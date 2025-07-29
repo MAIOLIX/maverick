@@ -8,6 +8,8 @@ import org.springframework.web.multipart.MultipartFile;
 import com.maiolix.maverick.handler.IModelHandler;
 import com.maiolix.maverick.handler.MojoModelHandler;
 import com.maiolix.maverick.handler.MojoModelHandler.MojoModelException;
+import com.maiolix.maverick.handler.OnnxExtModelHandler;
+import com.maiolix.maverick.handler.OnnxExtModelHandler.OnnxExtModelException;
 import com.maiolix.maverick.handler.OnnxModelHandler;
 import com.maiolix.maverick.handler.OnnxModelHandler.OnnxModelException;
 import com.maiolix.maverick.handler.PmmlModelHandler;
@@ -35,6 +37,9 @@ public class ModelServiceImpl implements IModelService {
         } catch (OnnxModelException e) {
             log.error("Failed to load ONNX model '{}': {}", modelName, e.getMessage(), e);
             throw new ModelUploadException("Failed to load ONNX model '" + modelName + "'", e);
+        } catch (OnnxExtModelException e) {
+            log.error("Failed to load ONNX Extended model '{}': {}", modelName, e.getMessage(), e);
+            throw new ModelUploadException("Failed to load ONNX Extended model '" + modelName + "'", e);
         } catch (MojoModelException e) {
             log.error("Failed to load MOJO model '{}': {}", modelName, e.getMessage(), e);
             throw new ModelUploadException("Failed to load MOJO model '" + modelName + "'", e);
@@ -109,12 +114,13 @@ public class ModelServiceImpl implements IModelService {
     }
     
     private IModelHandler createModelHandler(MultipartFile file, String type) 
-            throws IOException, OnnxModelException, MojoModelException {
+            throws IOException, OnnxModelException, OnnxExtModelException, MojoModelException {
         return switch (type.toUpperCase()) {
             case "ONNX" -> new OnnxModelHandler(file.getInputStream());
+            case "ONNX_EXT" -> new OnnxExtModelHandler(file.getInputStream());
             case "MOJO" -> new MojoModelHandler(file.getInputStream());
             case "PMML" -> new PmmlModelHandler(file.getInputStream());
-            default -> throw new IllegalArgumentException("Unsupported model type: " + type);
+            default -> throw new IllegalArgumentException("Unsupported model type: " + type + ". Supported types: ONNX, ONNX_EXT, MOJO, PMML");
         };
     }
     
