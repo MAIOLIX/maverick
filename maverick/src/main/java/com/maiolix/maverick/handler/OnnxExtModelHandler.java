@@ -15,6 +15,8 @@ import java.util.zip.ZipInputStream;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maiolix.maverick.exception.OnnxExtModelException;
+import com.maiolix.maverick.exception.OnnxExtPredictionException;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
@@ -396,32 +398,55 @@ public class OnnxExtModelHandler implements IModelHandler {
         LOGGER.info("ONNX Extended model handler closed and resources cleaned up");
     }
     
+    @Override
+    public Map<String, Object> getInputSchema() {
+        Map<String, Object> schema = new java.util.HashMap<>();
+        
+        try {
+            // Get input information from ONNX session
+            Map<String, ai.onnxruntime.NodeInfo> inputsInfo = session.getInputInfo();
+            
+            for (Map.Entry<String, ai.onnxruntime.NodeInfo> entry : inputsInfo.entrySet()) {
+                String inputName = entry.getKey();
+                ai.onnxruntime.NodeInfo nodeInfo = entry.getValue();
+                
+                Map<String, Object> inputDetails = new java.util.HashMap<>();
+                inputDetails.put("name", inputName);
+                inputDetails.put("type", nodeInfo.getInfo().toString());
+                
+                // Try to get tensor type info
+                if (nodeInfo.getInfo() instanceof ai.onnxruntime.TensorInfo tensorInfo) {
+                    inputDetails.put("dataType", tensorInfo.type.toString());
+                    inputDetails.put("shape", java.util.Arrays.toString(tensorInfo.getShape()));
+                    inputDetails.put("dimensions", tensorInfo.getShape().length);
+                }
+                
+                schema.put(inputName, inputDetails);
+            }
+            
+            // Add general information
+            schema.put("totalInputs", inputsInfo.size());
+            schema.put("inputNames", java.util.List.copyOf(session.getInputNames()));
+            
+            // Add label mapping information if available
+            if (labelMapping != null && !labelMapping.isEmpty()) {
+                schema.put("labelMapping", new java.util.HashMap<>(labelMapping));
+                schema.put("outputClasses", labelMapping.values());
+            }
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error extracting input schema from ONNX Extended model", e);
+            schema.put("error", "Unable to extract input schema: " + e.getMessage());
+        }
+        
+        return schema;
+    }
+    
     /**
      * Gets the label mapping loaded from the JSON file
      * @return map from label index to class name
      */
     public Map<String, String> getLabelMapping() {
         return labelMapping != null ? new java.util.HashMap<>(labelMapping) : new java.util.HashMap<>();
-    }
-    
-    // Custom exception classes
-    public static class OnnxExtModelException extends Exception {
-        public OnnxExtModelException(String message) {
-            super(message);
-        }
-        
-        public OnnxExtModelException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-    
-    public static class OnnxExtPredictionException extends RuntimeException {
-        public OnnxExtPredictionException(String message) {
-            super(message);
-        }
-        
-        public OnnxExtPredictionException(String message, Throwable cause) {
-            super(message, cause);
-        }
     }
 }

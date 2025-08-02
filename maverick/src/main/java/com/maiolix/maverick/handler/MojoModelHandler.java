@@ -9,6 +9,9 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.maiolix.maverick.exception.MojoModelException;
+import com.maiolix.maverick.exception.MojoPredictionException;
+
 import hex.genmodel.MojoModel;
 import hex.genmodel.easy.EasyPredictModelWrapper;
 import hex.genmodel.easy.RowData;
@@ -17,6 +20,8 @@ import hex.genmodel.easy.prediction.MultinomialModelPrediction;
 @SuppressWarnings("java:S2139") // Sonar warning for exception handling - we properly log and rethrow
 public class MojoModelHandler implements IModelHandler {
     private static final Logger LOGGER = Logger.getLogger(MojoModelHandler.class.getName());
+    private static final String CATEGORICAL_TYPE = "categorical";
+    private static final String NUMERIC_TYPE = "numeric";
     
     private final EasyPredictModelWrapper model;
     private File tempModelFile;
@@ -130,26 +135,137 @@ public class MojoModelHandler implements IModelHandler {
         LOGGER.info("MOJO model handler closed and resources cleaned up");
     }
     
-    // Custom exception classes
-    public static class MojoModelException extends Exception {
-        public MojoModelException(String message) {
-            super(message);
+    @Override
+    public Map<String, Object> getInputSchema() {
+        Map<String, Object> schema = new java.util.HashMap<>();
+        
+        try {
+            // Get underlying GenModel from wrapper
+            hex.genmodel.GenModel genModel = model.m;
+            
+            // Extract feature names
+            String[] featureNames = genModel.getNames();
+            
+            // Create detailed input information
+            Map<String, Object> features = new java.util.HashMap<>();
+            for (int i = 0; i < featureNames.length; i++) {
+                Map<String, Object> featureInfo = new java.util.HashMap<>();
+                featureInfo.put("index", i);
+                featureInfo.put("name", featureNames[i]);
+                
+                // Check if categorical (has domain values)
+                String[] domainValues = genModel.getDomainValues(i);
+                if (domainValues != null && domainValues.length > 0) {
+                    featureInfo.put("type", CATEGORICAL_TYPE);
+                    featureInfo.put("domainValues", java.util.Arrays.asList(domainValues));
+                } else {
+                    featureInfo.put("type", NUMERIC_TYPE);
+                }
+                
+                features.put(featureNames[i], featureInfo);
+            }
+            
+            schema.put("features", features);
+            schema.put("totalFeatures", featureNames.length);
+            schema.put("featureNames", java.util.Arrays.asList(featureNames));
+            
+            // Add model metadata
+            schema.put("modelCategory", genModel.getModelCategory().toString());
+            schema.put("responseColumnName", genModel.getResponseName());
+            
+            // Add output information
+            if (genModel.isSupervised()) {
+                schema.put("supervised", true);
+                schema.put("nClasses", genModel.getNumResponseClasses());
+                
+                if (genModel.getNumResponseClasses() > 1) {
+                    String[] responseNames = genModel.getDomainValues(genModel.getResponseName());
+                    if (responseNames != null) {
+                        schema.put("responseClasses", java.util.Arrays.asList(responseNames));
+                    }
+                }
+            } else {
+                schema.put("supervised", false);
+            }
+            
+            // Add model type
+            schema.put("modelType", "MOJO");
+            
+            // Add input example
+            addInputExample(schema, features, featureNames);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error extracting input schema from MOJO model", e);
+            schema.put("error", "Unable to extract input schema: " + e.getMessage());
         }
         
-        public MojoModelException(String message, Throwable cause) {
-            super(message, cause);
+        return schema;
+    }
+    
+    private void addInputExample(Map<String, Object> schema, Map<String, Object> features, String[] featureNames) {
+        Map<String, Object> inputExample = new java.util.HashMap<>();
+        
+        for (String featureName : featureNames) {
+            Object featureInfo = features.get(featureName);
+            if (featureInfo instanceof Map<?, ?> featureMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typedFeatureMap = (Map<String, Object>) featureMap;
+                
+                String type = (String) typedFeatureMap.get("type");
+                if (CATEGORICAL_TYPE.equals(type)) {
+                    // For categorical features, use the first domain value as example
+                    addCategoricalExample(inputExample, featureName, typedFeatureMap);
+                } else {
+                    // For numeric features, use 0.0 as example
+                    inputExample.put(featureName, 0.0);
+                }
+            }
+        }
+        
+        if (!inputExample.isEmpty()) {
+            schema.put("inputExample", inputExample);
+            addUsageInstructions(schema, features, featureNames);
         }
     }
     
-    public static class MojoPredictionException extends RuntimeException {
-        public MojoPredictionException(String message) {
-            super(message);
-        }
-        
-        public MojoPredictionException(String message, Throwable cause) {
-            super(message, cause);
+    private void addCategoricalExample(Map<String, Object> inputExample, String featureName, Map<String, Object> featureMap) {
+        @SuppressWarnings("unchecked")
+        java.util.List<String> domainValues = (java.util.List<String>) featureMap.get("domainValues");
+        if (domainValues != null && !domainValues.isEmpty()) {
+            inputExample.put(featureName, domainValues.get(0));
+        } else {
+            inputExample.put(featureName, "category_value");
         }
     }
+    
+    private void addUsageInstructions(Map<String, Object> schema, Map<String, Object> features, String[] featureNames) {
+        Map<String, Object> usageInstructions = new java.util.HashMap<>();
+        usageInstructions.put("format", "JSON object with feature names as keys");
+        usageInstructions.put("note", "Use exact feature names and appropriate data types");
+        
+        // Add specific instructions for categorical features
+        java.util.List<String> categoricalFeatures = getCategoricalFeatures(features, featureNames);
+        
+        if (!categoricalFeatures.isEmpty()) {
+            usageInstructions.put("categoricalFeatures", categoricalFeatures);
+            usageInstructions.put("categoricalNote", "Use exact values from domainValues for categorical features");
+        }
+        
+        schema.put("usageInstructions", usageInstructions);
+    }
+    
+    private java.util.List<String> getCategoricalFeatures(Map<String, Object> features, String[] featureNames) {
+        java.util.List<String> categoricalFeatures = new java.util.ArrayList<>();
+        for (String featureName : featureNames) {
+            Object featureInfo = features.get(featureName);
+            if (featureInfo instanceof Map<?, ?> featureMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typedFeatureMap = (Map<String, Object>) featureMap;
+                if (CATEGORICAL_TYPE.equals(typedFeatureMap.get("type"))) {
+                    categoricalFeatures.add(featureName);
+                }
+            }
+        }
+        return categoricalFeatures;
+    }
 }
-
-

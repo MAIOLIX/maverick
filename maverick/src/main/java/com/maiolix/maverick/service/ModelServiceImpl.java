@@ -1,18 +1,23 @@
 package com.maiolix.maverick.service;
 
 import java.io.IOException;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.maiolix.maverick.exception.ModelNotFoundException;
+import com.maiolix.maverick.exception.ModelPredictionException;
+import com.maiolix.maverick.exception.ModelUploadException;
+import com.maiolix.maverick.exception.MojoModelException;
+import com.maiolix.maverick.exception.OnnxExtModelException;
+import com.maiolix.maverick.exception.OnnxModelException;
 import com.maiolix.maverick.handler.IModelHandler;
 import com.maiolix.maverick.handler.MojoModelHandler;
-import com.maiolix.maverick.handler.MojoModelHandler.MojoModelException;
 import com.maiolix.maverick.handler.OnnxExtModelHandler;
-import com.maiolix.maverick.handler.OnnxExtModelHandler.OnnxExtModelException;
 import com.maiolix.maverick.handler.OnnxModelHandler;
-import com.maiolix.maverick.handler.OnnxModelHandler.OnnxModelException;
 import com.maiolix.maverick.handler.PmmlModelHandler;
+import com.maiolix.maverick.registry.ModelCacheEntry;
 import com.maiolix.maverick.registry.ModelRegistry;
 
 import lombok.extern.slf4j.Slf4j;
@@ -114,7 +119,7 @@ public class ModelServiceImpl implements IModelService {
     }
     
     private IModelHandler createModelHandler(MultipartFile file, String type) 
-            throws IOException, OnnxModelException, OnnxExtModelException, MojoModelException {
+            throws IOException {
         return switch (type.toUpperCase()) {
             case "ONNX" -> new OnnxModelHandler(file.getInputStream());
             case "ONNX_EXT" -> new OnnxExtModelHandler(file.getInputStream());
@@ -124,34 +129,73 @@ public class ModelServiceImpl implements IModelService {
         };
     }
     
-    // Custom exception classes
-    public static class ModelUploadException extends RuntimeException {
-        public ModelUploadException(String message) {
-            super(message);
+    @Override
+    public Object getInputSchema(String modelName, String version) {
+        String key = ModelCacheEntry.generateKey(modelName, version);
+        
+        if (!ModelRegistry.existsByKey(key)) {
+            throw new ModelNotFoundException("Model not found: " + modelName + " version: " + version);
         }
         
-        public ModelUploadException(String message, Throwable cause) {
-            super(message, cause);
+        try {
+            ModelCacheEntry cacheEntry = ModelRegistry.getByKey(key);
+            IModelHandler handler = cacheEntry.getHandler();
+            
+            // Get input schema from handler
+            Map<String, Object> schema = handler.getInputSchema();
+            
+            // Add additional metadata
+            Map<String, Object> completeSchema = new java.util.HashMap<>(schema);
+            completeSchema.put("modelName", modelName);
+            completeSchema.put("modelVersion", version);
+            completeSchema.put("modelType", cacheEntry.getType());
+            
+            log.info("Input schema retrieved for model: {} version: {}", modelName, version);
+            return completeSchema;
+            
+        } catch (Exception e) {
+            log.error("Error retrieving input schema for model '{}' version '{}'", modelName, version, e);
+            throw new ModelPredictionException("Error retrieving input schema for model '" + modelName + "' version '" + version + "'", e);
         }
     }
     
-    public static class ModelPredictionException extends RuntimeException {
-        public ModelPredictionException(String message) {
-            super(message);
+    @Override
+    public Object getModelInfo(String modelName, String version) {
+        String key = ModelCacheEntry.generateKey(modelName, version);
+        
+        if (!ModelRegistry.existsByKey(key)) {
+            throw new ModelNotFoundException("Model not found: " + modelName + " version: " + version);
         }
         
-        public ModelPredictionException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-    
-    public static class ModelNotFoundException extends RuntimeException {
-        public ModelNotFoundException(String message) {
-            super(message);
-        }
-        
-        public ModelNotFoundException(String message, Throwable cause) {
-            super(message, cause);
+        try {
+            ModelCacheEntry cacheEntry = ModelRegistry.getByKey(key);
+            
+            // Create comprehensive model information
+            Map<String, Object> modelInfo = new java.util.HashMap<>();
+            modelInfo.put("modelName", modelName);
+            modelInfo.put("version", version);
+            modelInfo.put("type", cacheEntry.getType());
+            modelInfo.put("key", key);
+            
+            // Add label mapping if available
+            if (cacheEntry.hasLabelMapping()) {
+                modelInfo.put("labelMapping", cacheEntry.getLabelMapping());
+                modelInfo.put("hasLabelMapping", true);
+            } else {
+                modelInfo.put("hasLabelMapping", false);
+            }
+            
+            // Get input schema
+            IModelHandler handler = cacheEntry.getHandler();
+            Map<String, Object> inputSchema = handler.getInputSchema();
+            modelInfo.put("inputSchema", inputSchema);
+            
+            log.info("Model info retrieved for model: {} version: {}", modelName, version);
+            return modelInfo;
+            
+        } catch (Exception e) {
+            log.error("Error retrieving model info for '{}' version '{}'", modelName, version, e);
+            throw new ModelPredictionException("Error retrieving model info for '" + modelName + "' version '" + version + "'", e);
         }
     }
 }

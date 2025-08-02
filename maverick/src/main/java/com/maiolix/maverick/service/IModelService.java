@@ -13,4 +13,20 @@ public interface IModelService {
      * @return prediction result
      */
     Object predict(String modelName, String version, Object input);
+    
+    /**
+     * Get input schema for a specific model version
+     * @param modelName the name of the model
+     * @param version the version of the model
+     * @return input schema information
+     */
+    Object getInputSchema(String modelName, String version);
+    
+    /**
+     * Get model information for a specific model version
+     * @param modelName the name of the model
+     * @param version the version of the model
+     * @return model metadata and information
+     */
+    Object getModelInfo(String modelName, String version);
 }

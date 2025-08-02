@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.maiolix.maverick.exception.OnnxModelException;
+import com.maiolix.maverick.exception.OnnxPredictionException;
+
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
@@ -179,29 +182,115 @@ public class OnnxModelHandler implements IModelHandler {
         }
     }
     
+    @Override
+    public Map<String, Object> getInputSchema() {
+        Map<String, Object> schema = new java.util.HashMap<>();
+        
+        try {
+            // Get input information from ONNX session
+            Map<String, ai.onnxruntime.NodeInfo> inputsInfo = session.getInputInfo();
+            
+            // Process each input
+            for (Map.Entry<String, ai.onnxruntime.NodeInfo> entry : inputsInfo.entrySet()) {
+                String inputName = entry.getKey();
+                ai.onnxruntime.NodeInfo nodeInfo = entry.getValue();
+                schema.put(inputName, createInputDetails(inputName, nodeInfo));
+            }
+            
+            // Add general information
+            addGeneralInfo(schema, inputsInfo);
+            
+            // Add usage example
+            addInputExample(schema);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error extracting input schema from ONNX model", e);
+            schema.put("error", "Unable to extract input schema: " + e.getMessage());
+        }
+        
+        return schema;
+    }
+    
+    private Map<String, Object> createInputDetails(String inputName, ai.onnxruntime.NodeInfo nodeInfo) {
+        Map<String, Object> inputDetails = new java.util.HashMap<>();
+        inputDetails.put("name", inputName);
+        
+        if (nodeInfo.getInfo() instanceof ai.onnxruntime.TensorInfo tensorInfo) {
+            addTensorInfo(inputDetails, tensorInfo);
+        } else {
+            inputDetails.put("type", nodeInfo.getInfo().toString());
+        }
+        
+        return inputDetails;
+    }
+    
+    private void addTensorInfo(Map<String, Object> inputDetails, ai.onnxruntime.TensorInfo tensorInfo) {
+        inputDetails.put("dataType", tensorInfo.type.toString());
+        inputDetails.put("shape", java.util.Arrays.toString(tensorInfo.getShape()));
+        inputDetails.put("dimensions", tensorInfo.getShape().length);
+        inputDetails.put("shapeArray", tensorInfo.getShape());
+        
+        // Add human-readable description
+        String description = createDescription(tensorInfo);
+        inputDetails.put("description", description);
+        
+        // Add expected input size for fixed dimensions
+        addExpectedFeatures(inputDetails, tensorInfo.getShape(), tensorInfo.type.toString());
+    }
+    
+    private String createDescription(ai.onnxruntime.TensorInfo tensorInfo) {
+        StringBuilder description = new StringBuilder();
+        description.append(tensorInfo.type.toString().toLowerCase()).append(" tensor");
+        if (tensorInfo.getShape().length > 0) {
+            description.append(" with shape ").append(java.util.Arrays.toString(tensorInfo.getShape()));
+        }
+        return description.toString();
+    }
+    
+    private void addExpectedFeatures(Map<String, Object> inputDetails, long[] shape, String dataType) {
+        if (shape.length > 1 && shape[1] > 0) {
+            inputDetails.put("expectedFeatures", shape[1]);
+            inputDetails.put("inputFormat", "Array of " + shape[1] + " " + dataType.toLowerCase() + " values");
+        }
+    }
+    
+    private void addGeneralInfo(Map<String, Object> schema, Map<String, ai.onnxruntime.NodeInfo> inputsInfo) {
+        schema.put("totalInputs", inputsInfo.size());
+        schema.put("inputNames", java.util.List.copyOf(session.getInputNames()));
+        schema.put("modelType", "ONNX");
+    }
+    
+    private void addInputExample(Map<String, Object> schema) {
+        Map<String, Object> example = new java.util.HashMap<>();
+        
+        for (String inputName : session.getInputNames()) {
+            Object inputInfo = schema.get(inputName);
+            if (inputInfo instanceof Map<?, ?> inputMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typedInputInfo = (Map<String, Object>) inputMap;
+                Object expectedFeatures = typedInputInfo.get("expectedFeatures");
+                if (expectedFeatures instanceof Long features) {
+                    java.util.List<Double> exampleValues = createExampleValues(features.intValue());
+                    example.put(inputName, exampleValues);
+                }
+            }
+        }
+        
+        if (!example.isEmpty()) {
+            schema.put("inputExample", example);
+        }
+    }
+    
+    private java.util.List<Double> createExampleValues(int count) {
+        java.util.List<Double> values = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            values.add(0.0);
+        }
+        return values;
+    }
+    
     public void close() {
         cleanup();
         LOGGER.info("ONNX model handler closed and resources cleaned up");
-    }
-    
-    // Classi di eccezione personalizzate
-    public static class OnnxModelException extends Exception {
-        public OnnxModelException(String message) {
-            super(message);
-        }
-        
-        public OnnxModelException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-    
-    public static class OnnxPredictionException extends RuntimeException {
-        public OnnxPredictionException(String message) {
-            super(message);
-        }
-        
-        public OnnxPredictionException(String message, Throwable cause) {
-            super(message, cause);
-        }
     }
 }
