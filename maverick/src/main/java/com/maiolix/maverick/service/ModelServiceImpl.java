@@ -26,6 +26,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ModelServiceImpl implements IModelService {
 
+    // Constants for JSON keys to avoid string duplication
+    private static final String MODEL_NAME_KEY = "modelName";
+    private static final String VERSION_KEY = "version";
+    private static final String HAS_LABEL_MAPPING_KEY = "hasLabelMapping";
+    private static final String MODEL_TYPE_KEY = "type";
+    private static final String MODEL_KEY = "key";
+
     @Override
     public void uploadModel(MultipartFile file, String modelName, String type, String version) {
         // Validate input parameters
@@ -146,7 +153,7 @@ public class ModelServiceImpl implements IModelService {
             
             // Add additional metadata
             Map<String, Object> completeSchema = new java.util.HashMap<>(schema);
-            completeSchema.put("modelName", modelName);
+            completeSchema.put(MODEL_NAME_KEY, modelName);
             completeSchema.put("modelVersion", version);
             completeSchema.put("modelType", cacheEntry.getType());
             
@@ -172,17 +179,17 @@ public class ModelServiceImpl implements IModelService {
             
             // Create comprehensive model information
             Map<String, Object> modelInfo = new java.util.HashMap<>();
-            modelInfo.put("modelName", modelName);
-            modelInfo.put("version", version);
-            modelInfo.put("type", cacheEntry.getType());
-            modelInfo.put("key", key);
+            modelInfo.put(MODEL_NAME_KEY, modelName);
+            modelInfo.put(VERSION_KEY, version);
+            modelInfo.put(MODEL_TYPE_KEY, cacheEntry.getType());
+            modelInfo.put(MODEL_KEY, key);
             
             // Add label mapping if available
             if (cacheEntry.hasLabelMapping()) {
                 modelInfo.put("labelMapping", cacheEntry.getLabelMapping());
-                modelInfo.put("hasLabelMapping", true);
+                modelInfo.put(HAS_LABEL_MAPPING_KEY, true);
             } else {
-                modelInfo.put("hasLabelMapping", false);
+                modelInfo.put(HAS_LABEL_MAPPING_KEY, false);
             }
             
             // Get input schema
@@ -196,6 +203,129 @@ public class ModelServiceImpl implements IModelService {
         } catch (Exception e) {
             log.error("Error retrieving model info for '{}' version '{}'", modelName, version, e);
             throw new ModelPredictionException("Error retrieving model info for '" + modelName + "' version '" + version + "'", e);
+        }
+    }
+    
+    @Override
+    public void addModel(String modelName, String type, String version, Object handler) {
+        // Validate input parameters
+        validateAddModelParameters(modelName, type, version, handler);
+        
+        log.info("Adding model to registry: {} type: {} version: {}", modelName, type, version);
+        
+        try {
+            if (!(handler instanceof IModelHandler)) {
+                throw new IllegalArgumentException("Handler must be an instance of IModelHandler");
+            }
+            
+            IModelHandler modelHandler = (IModelHandler) handler;
+            ModelRegistry.register(modelName, type, version, modelHandler);
+            log.info("Model {} successfully added to registry", modelName);
+            
+        } catch (Exception e) {
+            log.error("Error adding model '{}' version '{}' to registry: {}", modelName, version, e.getMessage(), e);
+            throw new ModelUploadException("Error adding model '" + modelName + "' version '" + version + "' to registry", e);
+        }
+    }
+    
+    @Override
+    public boolean removeModel(String modelName, String version) {
+        // Validate input parameters
+        validateRemoveModelParameters(modelName, version);
+        
+        log.info("Removing model from registry: {} version: {}", modelName, version);
+        
+        try {
+            var removedEntry = ModelRegistry.remove(modelName, version);
+            boolean wasRemoved = removedEntry != null;
+            
+            if (wasRemoved) {
+                log.info("Model {} version {} successfully removed from registry", modelName, version);
+            } else {
+                log.warn("Model {} version {} not found in registry", modelName, version);
+            }
+            
+            return wasRemoved;
+            
+        } catch (Exception e) {
+            log.error("Error removing model '{}' version '{}' from registry: {}", modelName, version, e.getMessage(), e);
+            throw new ModelPredictionException("Error removing model '" + modelName + "' version '" + version + "' from registry", e);
+        }
+    }
+    
+    private void validateAddModelParameters(String modelName, String type, String version, Object handler) {
+        if (modelName == null || modelName.trim().isEmpty()) {
+            throw new ModelUploadException("Model name cannot be null or empty");
+        }
+        
+        if (type == null || type.trim().isEmpty()) {
+            throw new ModelUploadException("Model type cannot be null or empty");
+        }
+        
+        if (version == null || version.trim().isEmpty()) {
+            throw new ModelUploadException("Model version cannot be null or empty");
+        }
+        
+        if (handler == null) {
+            throw new ModelUploadException("Model handler cannot be null");
+        }
+    }
+    
+    private void validateRemoveModelParameters(String modelName, String version) {
+        if (modelName == null || modelName.trim().isEmpty()) {
+            throw new ModelPredictionException("Model name cannot be null or empty");
+        }
+        
+        if (version == null || version.trim().isEmpty()) {
+            throw new ModelPredictionException("Model version cannot be null or empty");
+        }
+    }
+    
+    @Override
+    public Object getAllModels() {
+        log.info("Retrieving all models from cache");
+        
+        try {
+            var allModels = ModelRegistry.getAllModels();
+            
+            // Transform model cache entries to a more user-friendly format
+            var modelList = allModels.stream()
+                .map(entry -> {
+                    Map<String, Object> modelInfo = new java.util.HashMap<>();
+                    modelInfo.put(MODEL_NAME_KEY, entry.getModelName());
+                    modelInfo.put(MODEL_TYPE_KEY, entry.getType());
+                    modelInfo.put(VERSION_KEY, entry.getVersion());
+                    modelInfo.put(MODEL_KEY, entry.getKey());
+                    modelInfo.put(HAS_LABEL_MAPPING_KEY, entry.hasLabelMapping());
+                    
+                    // Add label mapping count if available
+                    if (entry.hasLabelMapping()) {
+                        modelInfo.put("labelMappingSize", entry.getLabelMapping().size());
+                    }
+                    
+                    return modelInfo;
+                })
+                .sorted((a, b) -> {
+                    // Sort by model name, then by version
+                    int nameComparison = ((String) a.get(MODEL_NAME_KEY)).compareTo((String) b.get(MODEL_NAME_KEY));
+                    if (nameComparison != 0) {
+                        return nameComparison;
+                    }
+                    return ((String) a.get(VERSION_KEY)).compareTo((String) b.get(VERSION_KEY));
+                })
+                .toList();
+            
+            // Create summary response
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("totalModels", allModels.size());
+            response.put("models", modelList);
+            
+            log.info("Retrieved {} models from cache", allModels.size());
+            return response;
+            
+        } catch (Exception e) {
+            log.error("Error retrieving all models from cache: {}", e.getMessage(), e);
+            throw new ModelPredictionException("Error retrieving all models from cache", e);
         }
     }
 }
