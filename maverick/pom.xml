@@ -13,7 +13,7 @@
     <groupId>com.maiolix</groupId>
     <artifactId>maverick</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>maverick</name>
+        <name>maverick</name>
     <description>Runtime per modelli MOJO, ONNX, PMML</description>
 
     <properties>
