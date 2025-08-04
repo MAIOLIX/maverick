@@ -115,6 +115,26 @@ public class ModelController {
         return ResponseEntity.ok(schema);
     }
     
+    @GetMapping("/info/{modelName}")
+    @Operation(summary = "Ottieni tutti i modelli per nome", 
+               description = "Restituisce tutte le versioni disponibili di un modello specificato per nome.")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", 
+                    description = "Modelli recuperati con successo",
+                    content = @Content(mediaType = "application/json",
+                                     examples = @ExampleObject(value = "[{\"modelName\": \"iris-model\", \"version\": \"1.0\", \"type\": \"ONNX\"}, {\"modelName\": \"iris-model\", \"version\": \"2.0\", \"type\": \"ONNX\"}]"))),
+        @ApiResponse(responseCode = "404", 
+                    description = "Nessun modello trovato con questo nome")
+    })
+    public ResponseEntity<Object> getModelsByName(
+            @Parameter(description = "Nome del modello", example = "iris-model", required = true)
+            @PathVariable String modelName) {
+        
+        Object models = modelService.getModelsByName(modelName);
+        log.debug("Retrieved models for name: {}", modelName);
+        return ResponseEntity.ok(models);
+    }
+    
     @GetMapping("/info/{version}/{modelName}")
     @Operation(summary = "Ottieni informazioni modello", 
                description = "Restituisce informazioni dettagliate sul modello specificato.")

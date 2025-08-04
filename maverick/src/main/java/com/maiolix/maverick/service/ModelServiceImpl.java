@@ -282,6 +282,61 @@ public class ModelServiceImpl implements IModelService {
     }
     
     @Override
+    public Object getModelsByName(String modelName) {
+        log.info("Retrieving all versions for model: {}", modelName);
+        
+        // Validate input
+        if (modelName == null || modelName.trim().isEmpty()) {
+            throw new ModelNotFoundException("Model name cannot be null or empty");
+        }
+        
+        try {
+            var allModels = ModelRegistry.getAllModels();
+            
+            // Filter models by name and transform to user-friendly format
+            var modelList = allModels.stream()
+                .filter(entry -> modelName.equals(entry.getModelName()))
+                .map(entry -> {
+                    Map<String, Object> modelInfo = new java.util.HashMap<>();
+                    modelInfo.put(MODEL_NAME_KEY, entry.getModelName());
+                    modelInfo.put(MODEL_TYPE_KEY, entry.getType());
+                    modelInfo.put(VERSION_KEY, entry.getVersion());
+                    modelInfo.put(MODEL_KEY, entry.getKey());
+                    modelInfo.put(HAS_LABEL_MAPPING_KEY, entry.hasLabelMapping());
+                    
+                    // Add label mapping count if available
+                    if (entry.hasLabelMapping()) {
+                        modelInfo.put("labelMappingSize", entry.getLabelMapping().size());
+                    }
+                    
+                    return modelInfo;
+                })
+                .sorted((a, b) -> ((String) a.get(VERSION_KEY)).compareTo((String) b.get(VERSION_KEY)))
+                .toList();
+            
+            if (modelList.isEmpty()) {
+                throw new ModelNotFoundException("No models found with name: " + modelName);
+            }
+            
+            // Create summary response
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put(MODEL_NAME_KEY, modelName);
+            response.put("totalVersions", modelList.size());
+            response.put("versions", modelList);
+            
+            log.info("Retrieved {} versions for model: {}", modelList.size(), modelName);
+            return response;
+            
+        } catch (ModelNotFoundException e) {
+            // Re-throw ModelNotFoundException to maintain proper error handling
+            throw e;
+        } catch (Exception e) {
+            log.error("Error retrieving models for name '{}': {}", modelName, e.getMessage(), e);
+            throw new ModelPredictionException("Error retrieving models for name: " + modelName, e);
+        }
+    }
+    
+    @Override
     public Object getAllModels() {
         log.info("Retrieving all models from cache");
         

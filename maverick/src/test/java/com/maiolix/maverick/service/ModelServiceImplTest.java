@@ -347,4 +347,124 @@ class ModelServiceImplTest {
         assertEquals("z-model", models.get(2).get("modelName"));
         assertEquals("1.0", models.get(2).get("version"));
     }
+    
+    @Test
+    void testGetModelsByNameNotFound() {
+        // Test with empty registry
+        Exception exception = assertThrows(ModelNotFoundException.class, () -> {
+            modelService.getModelsByName("non-existent");
+        });
+        
+        assertTrue(exception.getMessage().contains("No models found with name: non-existent"));
+    }
+    
+    @Test
+    void testGetModelsByNameWithNullName() {
+        Exception exception = assertThrows(ModelNotFoundException.class, () -> {
+            modelService.getModelsByName(null);
+        });
+        
+        assertTrue(exception.getMessage().contains("Model name cannot be null or empty"));
+    }
+    
+    @Test
+    void testGetModelsByNameWithEmptyName() {
+        Exception exception = assertThrows(ModelNotFoundException.class, () -> {
+            modelService.getModelsByName("   ");
+        });
+        
+        assertTrue(exception.getMessage().contains("Model name cannot be null or empty"));
+    }
+    
+    @Test
+    @SuppressWarnings("unchecked")
+    void testGetModelsByNameWithSingleVersion() {
+        // Setup test data
+        IModelHandler handler = mock(IModelHandler.class);
+        ModelRegistry.register("iris-model", "ONNX", "1.0", handler);
+        
+        // Execute
+        Object result = modelService.getModelsByName("iris-model");
+        
+        // Verify
+        assertInstanceOf(Map.class, result);
+        Map<String, Object> response = (Map<String, Object>) result;
+        
+        assertEquals("iris-model", response.get("modelName"));
+        assertEquals(1, response.get("totalVersions"));
+        
+        assertInstanceOf(java.util.List.class, response.get("versions"));
+        var versions = (java.util.List<Map<String, Object>>) response.get("versions");
+        assertEquals(1, versions.size());
+        
+        Map<String, Object> model = versions.get(0);
+        assertEquals("iris-model", model.get("modelName"));
+        assertEquals("ONNX", model.get("type"));
+        assertEquals("1.0", model.get("version"));
+    }
+    
+    @Test
+    @SuppressWarnings("unchecked")
+    void testGetModelsByNameWithMultipleVersions() {
+        // Setup test data with multiple versions of the same model
+        IModelHandler handler1 = mock(IModelHandler.class);
+        IModelHandler handler2 = mock(IModelHandler.class);
+        IModelHandler handler3 = mock(IModelHandler.class);
+        IModelHandler handler4 = mock(IModelHandler.class);
+        
+        ModelRegistry.register("iris-model", "ONNX", "1.0", handler1);
+        ModelRegistry.register("iris-model", "ONNX", "2.0", handler2);
+        ModelRegistry.register("fraud-model", "MOJO", "1.0", handler3);
+        ModelRegistry.register("iris-model", "ONNX", "1.5", handler4);
+        
+        // Execute
+        Object result = modelService.getModelsByName("iris-model");
+        
+        // Verify
+        assertInstanceOf(Map.class, result);
+        Map<String, Object> response = (Map<String, Object>) result;
+        
+        assertEquals("iris-model", response.get("modelName"));
+        assertEquals(3, response.get("totalVersions")); // Only iris-model versions
+        
+        assertInstanceOf(java.util.List.class, response.get("versions"));
+        var versions = (java.util.List<Map<String, Object>>) response.get("versions");
+        assertEquals(3, versions.size());
+        
+        // Verify all returned models have the correct name
+        for (Map<String, Object> model : versions) {
+            assertEquals("iris-model", model.get("modelName"));
+            assertEquals("ONNX", model.get("type"));
+        }
+        
+        // Verify sorting by version
+        assertEquals("1.0", versions.get(0).get("version"));
+        assertEquals("1.5", versions.get(1).get("version"));
+        assertEquals("2.0", versions.get(2).get("version"));
+    }
+    
+    @Test
+    @SuppressWarnings("unchecked")
+    void testGetModelsByNameFilteringCorrectly() {
+        // Setup test data with similar model names
+        IModelHandler handler1 = mock(IModelHandler.class);
+        IModelHandler handler2 = mock(IModelHandler.class);
+        
+        ModelRegistry.register("test-model", "ONNX", "1.0", handler1);
+        ModelRegistry.register("test-model-v2", "MOJO", "1.0", handler2);
+        
+        // Execute - search for exact name
+        Object result = modelService.getModelsByName("test-model");
+        
+        // Verify - should only return exact matches
+        assertInstanceOf(Map.class, result);
+        Map<String, Object> response = (Map<String, Object>) result;
+        
+        assertEquals("test-model", response.get("modelName"));
+        assertEquals(1, response.get("totalVersions"));
+        
+        var versions = (java.util.List<Map<String, Object>>) response.get("versions");
+        assertEquals(1, versions.size());
+        assertEquals("test-model", versions.get(0).get("modelName"));
+    }
 }

@@ -44,7 +44,11 @@ http://localhost:8080/api-docs
 
 ### ℹ️ **Informazioni Modello**
 - **Endpoint**: `GET /api/v1/models/info/{version}/{modelName}`
-- **Descrizione**: Restituisce metadati del modello
+- **Descrizione**: Restituisce metadati del modello specifico
+
+### 🔍 **Modelli per Nome**
+- **Endpoint**: `GET /api/v1/models/info/{modelName}`
+- **Descrizione**: Restituisce tutte le versioni di un modello per nome
 
 ### 📋 **Schema Input**
 - **Endpoint**: `GET /api/v1/models/schema/{version}/{modelName}`
@@ -65,6 +69,12 @@ curl -X POST "http://localhost:8080/api/v1/models/upload" \
   -F "modelName=iris-classifier" \
   -F "type=ONNX" \
   -F "version=1.0"
+```
+
+### Ottenere versioni di un modello
+```bash
+curl -X GET "http://localhost:8080/api/v1/models/info/iris-classifier" \
+  -H "Accept: application/json"
 ```
 
 ### Predizione

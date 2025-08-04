@@ -31,6 +31,13 @@ public interface IModelService {
     Object getModelInfo(String modelName, String version);
     
     /**
+     * Get all versions of models by name
+     * @param modelName the name of the model
+     * @return list of all model versions for the given name
+     */
+    Object getModelsByName(String modelName);
+    
+    /**
      * Add a model to the registry
      * @param modelName the name of the model
      * @param type the type of the model (ONNX, MOJO, PMML, etc.)
