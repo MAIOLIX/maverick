@@ -269,7 +269,8 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
     ('s3_default_region', 'eu-west-1', 'Regione AWS S3 predefinita'),
     ('azure_storage_account', 'maverickmodels', 'Nome dell''account Azure Storage'),
     ('gcs_project_id', 'maverick-ml-platform', 'ID progetto Google Cloud'),
-    ('minio_endpoint', 'minio.maverick.local:9000', 'Endpoint MinIO locale');
+    ('minio_endpoint', 'localhost:32768', 'Endpoint MinIO API (porta 9000 mappata su 32768)'),
+    ('minio_console_endpoint', 'localhost:32769', 'Endpoint MinIO Console (porta 9001 mappata su 32769)');
 
 -- Modelli di esempio con diversi tipi di storage
 INSERT INTO models (
