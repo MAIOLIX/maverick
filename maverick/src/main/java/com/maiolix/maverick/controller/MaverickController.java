@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -18,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.maiolix.maverick.constants.MaverickConstants;
 import com.maiolix.maverick.entity.ModelEntity;
 import com.maiolix.maverick.exception.ModelNotFoundException;
 import com.maiolix.maverick.exception.ModelPredictionException;
@@ -74,7 +74,7 @@ public class MaverickController {
             
             // === VERIFICA DUPLICATI ===
             if (modelDatabaseService.findByNameAndVersion(modelName, version).isPresent()) {
-                throw new ModelUploadException("Modello " + modelName + " versione " + version + " già esistente");
+                throw new ModelUploadException(MaverickConstants.MODELLO + modelName + MaverickConstants.VERSIONE + version + " già esistente");
             }
             
             // === DETERMINA TIPO MODELLO ===
@@ -113,19 +113,19 @@ public class MaverickController {
             ModelEntity savedModel = modelDatabaseService.saveModel(modelEntity);
             
             // === RISPOSTA DI SUCCESSO ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Modello caricato con successo (non attivo)");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Modello caricato con successo (non attivo)");
             response.put("modelId", savedModel.getId());
             response.put("modelUuid", savedModel.getModelUuid());
-            response.put("modelName", modelName);
-            response.put("version", version);
+            response.put(MaverickConstants.MODEL_NAME, modelName);
+            response.put(MaverickConstants.VERSION, version);
             response.put("type", type.toString());
             response.put("fileName", fileName);
             response.put("minioPath", modelName + "/" + version + "/" + fileName);
             response.put("bucket", minioRepository.getDefaultBucket());
-            response.put("fileSize", file.getSize());
+            response.put(MaverickConstants.FILE_SIZE, file.getSize());
             response.put("fileHash", fileHash);
-            response.put("isActive", false);
+            response.put(MaverickConstants.IS_ACTIVE, false);
             response.put("createdAt", savedModel.getCreatedAt());
             response.put("note", "Usa /load per attivare il modello e caricarlo in memoria");
             
@@ -224,16 +224,16 @@ public class MaverickController {
             
             // === VERIFICA ESISTENZA NEL DATABASE ===
             ModelEntity modelEntity = modelDatabaseService.findByNameAndVersion(modelName, version)
-                .orElseThrow(() -> new ModelNotFoundException("Modello " + modelName + " versione " + version + " non trovato nel database"));
+                .orElseThrow(() -> new ModelNotFoundException(MaverickConstants.MODELLO + modelName + MaverickConstants.VERSIONE + version + MaverickConstants.NON_TROVATO_DB));
             
             // === VERIFICA SE GIÀ IN MEMORIA ===
             String modelKey = modelName + "_" + version;
             if (ModelRegistry.exists(modelName, version)) {
                 log.info("⚡ Modello {} già presente in memoria", modelKey);
-                response.put("status", "SUCCESS");
-                response.put("message", "Modello già caricato in memoria");
-                response.put("modelName", modelName);
-                response.put("version", version);
+                response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+                response.put(MaverickConstants.MESSAGE, "Modello già caricato in memoria");
+                response.put(MaverickConstants.MODEL_NAME, modelName);
+                response.put(MaverickConstants.VERSION, version);
                 response.put("cached", true);
                 return ResponseEntity.ok(response);
             }
@@ -241,22 +241,7 @@ public class MaverickController {
             // === CARICAMENTO REALE IN MEMORIA ===
             log.info("📥 Download modello da MinIO: {}", modelEntity.getFilePath());
             
-            try {
-                // Download del file da MinIO
-                InputStream modelStream = minioRepository.downloadModel(modelEntity.getFilePath());
-                
-                // Crea l'handler per il modello
-                Object handler = modelService.createModelHandler(modelStream, modelEntity.getType().toString());
-                
-                // Registra il modello con l'handler nella cache
-                ModelRegistry.register(modelName, modelEntity.getType().toString(), version, (IModelHandler) handler);
-                
-                log.info("✅ Handler creato e registrato per modello {} v{}", modelName, version);
-                
-            } catch (Exception e) {
-                log.error("❌ Errore creazione handler: {}", e.getMessage(), e);
-                throw new ModelUploadException("Impossibile creare handler per il modello: " + e.getMessage(), e);
-            }
+            loadModelIntoMemoryCache(modelName, version, modelEntity);
             
             // === AGGIORNAMENTO TIMESTAMP E ATTIVAZIONE ===
             modelEntity.setLastUsedAt(LocalDateTime.now());
@@ -265,16 +250,16 @@ public class MaverickController {
             
             log.info("✅ Modello {} v{} attivato nel database", modelName, version);
             
-            response.put("status", "SUCCESS");
-            response.put("message", "Modello caricato e attivato con successo in memoria");
-            response.put("modelName", modelName);
-            response.put("version", version);
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Modello caricato e attivato con successo in memoria");
+            response.put(MaverickConstants.MODEL_NAME, modelName);
+            response.put(MaverickConstants.VERSION, version);
             response.put("type", modelEntity.getType().toString());
-            response.put("fileSize", modelEntity.getFileSize());
+            response.put(MaverickConstants.FILE_SIZE, modelEntity.getFileSize());
             response.put("minioPath", modelEntity.getFilePath());
             response.put("loadedAt", System.currentTimeMillis());
             response.put("cached", true);
-            response.put("isActive", true);
+            response.put(MaverickConstants.IS_ACTIVE, true);
             
             log.info("✅ Modello {} v{} caricato in memoria", modelName, version);
             
@@ -307,7 +292,7 @@ public class MaverickController {
             
             // === VERIFICA ESISTENZA NEL DATABASE ===
             ModelEntity modelEntity = modelDatabaseService.findByNameAndVersion(modelName, version)
-                .orElseThrow(() -> new ModelNotFoundException("Modello " + modelName + " versione " + version + " non trovato nel database"));
+                .orElseThrow(() -> new ModelNotFoundException(MaverickConstants.MODELLO + modelName + MaverickConstants.VERSIONE + version + MaverickConstants.NON_TROVATO_DB));
             
             // === RIMOZIONE DALLA CACHE ===
             boolean removed = modelService.removeModel(modelName, version);
@@ -414,15 +399,15 @@ public class MaverickController {
             List<Map<String, Object>> modelsList = cachedModels.stream()
                 .map(entry -> {
                     Map<String, Object> modelInfo = new HashMap<>();
-                    modelInfo.put("modelName", entry.getModelName());
-                    modelInfo.put("version", entry.getVersion());
+                    modelInfo.put(MaverickConstants.MODEL_NAME, entry.getModelName());
+                    modelInfo.put(MaverickConstants.VERSION, entry.getVersion());
                     modelInfo.put("type", entry.getType());
                     modelInfo.put("key", entry.getKey());
                     modelInfo.put("hasHandler", entry.getHandler() != null);
                     modelInfo.put("hasLabelMapping", entry.getLabelMapping() != null);
                     return modelInfo;
                 })
-                .collect(Collectors.toList());
+                .toList();
             
             // === STATISTICHE GENERALI ===
             Map<String, Object> statistics = new HashMap<>();
@@ -430,18 +415,18 @@ public class MaverickController {
             statistics.put("modelTypes", modelsList.stream()
                 .map(model -> (String) model.get("type"))
                 .distinct()
-                .collect(Collectors.toList()));
+                .toList());
             statistics.put("uniqueModelNames", modelsList.stream()
-                .map(model -> (String) model.get("modelName"))
+                .map(model -> (String) model.get(MaverickConstants.MODEL_NAME))
                 .distinct()
                 .count());
             
             // === RISPOSTA ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Lista modelli in memoria recuperata con successo");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Lista modelli in memoria recuperata con successo");
             response.put("models", modelsList);
-            response.put("statistics", statistics);
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.STATISTICS, statistics);
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             log.info("✅ Lista modelli in memoria: {} modelli trovati", modelsList.size());
             
@@ -450,9 +435,9 @@ public class MaverickController {
         } catch (Exception e) {
             log.error("❌ Errore recupero lista modelli: {}", e.getMessage(), e);
             
-            response.put("status", "ERROR");
-            response.put("message", "Errore durante recupero lista modelli: " + e.getMessage());
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante recupero lista modelli: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             return ResponseEntity.status(500).body(response);
         }
@@ -475,7 +460,7 @@ public class MaverickController {
             
             // === VERIFICA ESISTENZA NEL DATABASE ===
             ModelEntity modelEntity = modelDatabaseService.findByNameAndVersion(modelName, version)
-                .orElseThrow(() -> new ModelNotFoundException("Modello " + modelName + " versione " + version + " non trovato nel database"));
+                .orElseThrow(() -> new ModelNotFoundException(MaverickConstants.MODELLO + modelName + MaverickConstants.VERSIONE + version + MaverickConstants.NON_TROVATO_DB));
             
             boolean memoryRemoved = false;
             boolean minioDeleted = false;
@@ -586,7 +571,7 @@ public class MaverickController {
                 .distinct()
                 .toList());
             statistics.put("activeModels", modelsList.stream()
-                .mapToLong(model -> (Boolean) model.get("isActive") ? 1L : 0L)
+                .mapToLong(model -> Boolean.TRUE.equals(model.get(MaverickConstants.IS_ACTIVE)) ? 1L : 0L)
                 .sum());
             statistics.put("storageTypes", modelsList.stream()
                 .map(model -> (String) model.get("storageType"))
@@ -701,7 +686,7 @@ public class MaverickController {
                 .toList();
                 
             List<String> cacheKeys = cachedModels.stream()
-                .map(entry -> entry.getKey())
+                .map(com.maiolix.maverick.registry.ModelCacheEntry::getKey)
                 .toList();
             
             // Modelli attivi nel DB ma non in cache
@@ -753,6 +738,30 @@ public class MaverickController {
             response.put("timestamp", System.currentTimeMillis());
             
             return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    // === METODI HELPER PRIVATI ===
+
+    /**
+     * Carica un modello nella cache in memoria
+     */
+    private void loadModelIntoMemoryCache(String modelName, String version, ModelEntity modelEntity) {
+        try {
+            // Download del file da MinIO
+            InputStream modelStream = minioRepository.downloadModel(modelEntity.getFilePath());
+            
+            // Crea l'handler per il modello
+            Object handler = modelService.createModelHandler(modelStream, modelEntity.getType().toString());
+            
+            // Registra il modello con l'handler nella cache
+            ModelRegistry.register(modelName, modelEntity.getType().toString(), version, (IModelHandler) handler);
+            
+            log.info("✅ Handler creato e registrato per modello {} v{}", modelName, version);
+            
+        } catch (Exception e) {
+            log.error("❌ Errore creazione handler: {}", e.getMessage(), e);
+            throw new ModelUploadException("Impossibile creare handler per il modello: " + e.getMessage(), e);
         }
     }
 }

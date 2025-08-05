@@ -51,25 +51,12 @@ public class ModelBootstrapService {
             
             // === CARICAMENTO MODELLI IN MEMORIA ===
             for (ModelEntity model : activeModels) {
-                try {
-                    loadModelIntoMemory(model);
+                if (loadSingleModel(model)) {
                     successCount++;
                     log.info("✅ Modello caricato: {} v{}", model.getModelName(), model.getVersion());
-                    
-                } catch (Exception e) {
+                } else {
                     failureCount++;
-                    log.error("❌ Errore caricamento modello {} v{}: {}", 
-                            model.getModelName(), model.getVersion(), e.getMessage(), e);
-                    
-                    // Disattiva il modello se non può essere caricato
-                    try {
-                        model.setIsActive(false);
-                        modelDatabaseService.saveModel(model);
-                        log.warn("⚠️ Modello {} v{} disattivato a causa dell'errore di caricamento", 
-                                model.getModelName(), model.getVersion());
-                    } catch (Exception saveError) {
-                        log.error("❌ Errore disattivazione modello: {}", saveError.getMessage());
-                    }
+                    handleModelLoadFailure(model);
                 }
             }
             
@@ -83,6 +70,34 @@ public class ModelBootstrapService {
             
         } catch (Exception e) {
             log.error("❌ Errore durante caricamento automatico modelli: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Carica un singolo modello in memoria
+     */
+    private boolean loadSingleModel(ModelEntity model) {
+        try {
+            loadModelIntoMemory(model);
+            return true;
+        } catch (Exception e) {
+            log.error("❌ Errore caricamento modello {} v{}: {}", 
+                    model.getModelName(), model.getVersion(), e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Gestisce il fallimento del caricamento di un modello
+     */
+    private void handleModelLoadFailure(ModelEntity model) {
+        try {
+            model.setIsActive(false);
+            modelDatabaseService.saveModel(model);
+            log.warn("⚠️ Modello {} v{} disattivato a causa dell'errore di caricamento", 
+                    model.getModelName(), model.getVersion());
+        } catch (Exception saveError) {
+            log.error("❌ Errore disattivazione modello: {}", saveError.getMessage());
         }
     }
 
@@ -128,7 +143,7 @@ public class ModelBootstrapService {
             // Raggruppa per tipo
             var typeStats = cachedModels.stream()
                 .collect(java.util.stream.Collectors.groupingBy(
-                    entry -> entry.getType(),
+                    com.maiolix.maverick.registry.ModelCacheEntry::getType,
                     java.util.stream.Collectors.counting()
                 ));
             

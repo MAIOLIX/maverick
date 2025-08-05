@@ -1,51 +1,106 @@
-# MaverickController - API Completa
+# MaverickController - API Reference
 
-## Overview
-Il `MaverickController` è il controller principale che integra **database PostgreSQL**, **storage MinIO** e **cache in memoria** per la gestione completa dei modelli ML con funzionalità di predizione.
+## 🎯 **9 Endpoints Principali**
 
-## Endpoints Disponibili
-
-### 1. Upload Completo
-**POST** `/api/v1/maverick/upload`
-
-Carica un modello ML su MinIO e salva tutti i metadati nel database PostgreSQL in una singola operazione transazionale.
+### 1. **Upload Modello**
+```http
+POST /api/v1/maverick/upload
+Content-Type: multipart/form-data
+```
+Carica modello su MinIO e salva metadati nel database (stato: **inattivo**).
 
 **Parametri:**
-- `file` (MultipartFile): File del modello (max 100MB)
-- `modelName` (String): Nome del modello (solo lettere, numeri, _, -)
-- `version` (String): Versione (formato v1.0 o 1.0.0)
-- `type` (String): Tipo modello (ONNX, PMML, MOJO, H2O, ONNX_EXT)
-- `description` (String, opzionale): Descrizione del modello
+- `file` (MultipartFile) - File modello (max 100MB)
+- `modelName` (String) - Nome modello
+- `version` (String) - Versione (es: v1.0)
+- `type` (String) - ONNX|PMML|MOJO|H2O
+- `description` (String, opz) - Descrizione
 
-**Esempio cURL:**
-```bash
-curl -X POST "http://localhost:8080/api/v1/maverick/upload" \
-     -F "file=@iris_model.onnx" \
-     -F "modelName=iris-classifier" \
-     -F "version=v1.0" \
-     -F "type=ONNX" \
-     -F "description=Modello classificazione Iris"
+### 2. **Attiva Modello**
+```http
+POST /api/v1/maverick/load?modelName=iris&version=v1.0
+```
+Carica modello da MinIO in memoria e lo attiva nel database.
+
+### 3. **Predizione**
+```http
+POST /api/v1/maverick/predict?modelName=iris&version=v1.0
+Content-Type: application/json
+
+{
+  "features": [5.1, 3.5, 1.4, 0.2]
+}
 ```
 
-**Risposta di successo:**
-```json
-{
-    "status": "SUCCESS",
-    "message": "Modello caricato con successo (non attivo)",
-    "modelId": 1,
-    "modelUuid": "550e8400-e29b-41d4-a716-446655440000",
-    "modelName": "iris-classifier",
-    "version": "v1.0",
-    "type": "ONNX",
-    "fileName": "iris_model.onnx",
-    "minioPath": "iris-classifier/v1.0/iris_model.onnx",
-    "bucket": "maverick",
-    "fileSize": 1024,
-    "fileHash": "abc123",
-    "isActive": false,
-    "createdAt": "2025-08-05T10:30:00",
-    "note": "Usa /load per attivare il modello e caricarlo in memoria"
-}
+### 4. **Disattiva Modello**
+```http
+DELETE /api/v1/maverick/remove?modelName=iris&version=v1.0
+```
+Rimuove da memoria e disattiva nel database (file su MinIO rimane).
+
+### 5. **Elimina Modello**
+```http
+DELETE /api/v1/maverick/delete?modelName=iris&version=v1.0
+```
+Elimina da memoria, database E MinIO completamente.
+
+### 6. **Lista Modelli in Memoria**
+```http
+GET /api/v1/maverick/models-in-memory
+```
+
+### 7. **Lista Modelli Database**
+```http
+GET /api/v1/maverick/models-database?page=0&size=10
+```
+
+### 8. **Ricarica Modelli Attivi**
+```http
+POST /api/v1/maverick/bootstrap/reload
+```
+Ricarica tutti i modelli attivi dal database in memoria.
+
+### 9. **Audit Sistema**
+```http
+GET /api/v1/maverick/bootstrap/audit
+```
+Verifica consistenza tra database e memoria.
+
+## 🔄 **Workflow Tipico**
+
+```mermaid
+graph LR
+    A[Upload] --> B[Load] --> C[Predict] --> D[Remove] --> E[Delete]
+    A --> |Salva su MinIO + DB| B
+    B --> |Carica in memoria| C  
+    C --> |Usa modello| D
+    D --> |Disattiva| E
+    E --> |Elimina tutto| F[Fine]
+```
+
+## 📊 **Stati Modello**
+
+| Stato | Database | Memoria | MinIO | Azioni Possibili |
+|-------|----------|---------|-------|------------------|
+| **Uploaded** | ✅ (inattivo) | ❌ | ✅ | Load, Delete |
+| **Active** | ✅ (attivo) | ✅ | ✅ | Predict, Remove, Delete |
+| **Removed** | ✅ (inattivo) | ❌ | ✅ | Load, Delete |
+| **Deleted** | ❌ | ❌ | ❌ | Upload nuovo |
+
+## 🧪 **Test Rapidi**
+
+```bash
+# Upload
+curl -X POST -F "file=@model.onnx" -F "modelName=test" -F "version=v1.0" -F "type=ONNX" \
+  http://localhost:8080/api/v1/maverick/upload
+
+# Load  
+curl -X POST "http://localhost:8080/api/v1/maverick/load?modelName=test&version=v1.0"
+
+# Predict
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"features":[1,2,3,4]}' \
+  "http://localhost:8080/api/v1/maverick/predict?modelName=test&version=v1.0"
 ```
 
 ### 2. Load Modello in Memoria
