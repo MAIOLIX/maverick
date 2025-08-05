@@ -254,6 +254,60 @@ public class ModelDatabaseService {
         return modelRepository.findBucketsByStorageType(storageType);
     }
 
+    /**
+     * Recupera tutti i modelli con paginazione
+     */
+    @Transactional(readOnly = true)
+    public Page<ModelEntity> getAllModels(int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        return modelRepository.findAll(pageable);
+    }
+
+    /**
+     * Recupera tutti i modelli attivi dal database
+     */
+    @Transactional(readOnly = true)
+    public List<ModelEntity> findActiveModels() {
+        return modelRepository.findByIsActiveTrueOrderByCreatedAtDesc();
+    }
+
+    /**
+     * Elimina un modello dal database
+     */
+    public boolean deleteModel(String modelName, String version) {
+        log.info("🗑️ Eliminazione modello dal database: {} v{}", modelName, version);
+        
+        Optional<ModelEntity> modelOpt = modelRepository.findByModelNameAndVersion(modelName, version);
+        if (modelOpt.isPresent()) {
+            ModelEntity model = modelOpt.get();
+            modelRepository.delete(model);
+            log.info("✅ Modello {} v{} eliminato dal database (ID: {})", modelName, version, model.getId());
+            return true;
+        } else {
+            log.warn("⚠️ Modello {} v{} non trovato nel database", modelName, version);
+            return false;
+        }
+    }
+
+    /**
+     * Elimina un modello dal database per ID
+     */
+    public boolean deleteModelById(Long id) {
+        log.info("🗑️ Eliminazione modello dal database per ID: {}", id);
+        
+        Optional<ModelEntity> modelOpt = modelRepository.findById(id);
+        if (modelOpt.isPresent()) {
+            ModelEntity model = modelOpt.get();
+            modelRepository.delete(model);
+            log.info("✅ Modello {} v{} eliminato dal database (ID: {})", 
+                    model.getModelName(), model.getVersion(), id);
+            return true;
+        } else {
+            log.warn("⚠️ Modello con ID {} non trovato nel database", id);
+            return false;
+        }
+    }
+
     // ==== UTILITY METHODS ====
 
     /**

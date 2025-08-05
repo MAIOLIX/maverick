@@ -47,6 +47,14 @@ public interface IModelService {
     void addModel(String modelName, String type, String version, Object handler);
     
     /**
+     * Create a model handler from an InputStream
+     * @param inputStream the input stream of the model file
+     * @param type the type of the model (ONNX, MOJO, PMML, etc.)
+     * @return the model handler instance
+     */
+    Object createModelHandler(java.io.InputStream inputStream, String type);
+
+    /**
      * Remove a model from the registry
      * @param modelName the name of the model
      * @param version the version of the model

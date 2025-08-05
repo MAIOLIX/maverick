@@ -137,6 +137,22 @@ public class ModelServiceImpl implements IModelService {
     }
     
     @Override
+    public Object createModelHandler(java.io.InputStream inputStream, String type) {
+        try {
+            return switch (type.toUpperCase()) {
+                case "ONNX" -> new OnnxModelHandler(inputStream);
+                case "ONNX_EXT" -> new OnnxExtModelHandler(inputStream);
+                case "MOJO" -> new MojoModelHandler(inputStream);
+                case "PMML" -> new PmmlModelHandler(inputStream);
+                default -> throw new IllegalArgumentException("Unsupported model type: " + type + ". Supported types: ONNX, ONNX_EXT, MOJO, PMML");
+            };
+        } catch (Exception e) {
+            log.error("Error creating model handler for type '{}': {}", type, e.getMessage(), e);
+            throw new ModelUploadException("Failed to create model handler for type '" + type + "'", e);
+        }
+    }
+    
+    @Override
     public Object getInputSchema(String modelName, String version) {
         String key = ModelCacheEntry.generateKey(modelName, version);
         
