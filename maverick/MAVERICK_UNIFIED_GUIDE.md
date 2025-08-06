@@ -1,353 +1,504 @@
-# 📖 Maverick Controller - Guida Completa API
+# � Maverick ML Platform - Guida Completa
 
-## 🎯 Panoramica
+**Maverick** è una piattaforma completa per la gestione e predizione di modelli Machine Learning con sistema di autenticazione JWT integrato.
 
-Maverick è un sistema completo per la gestione e l'esecuzione di modelli di Machine Learning in production. Supporta modelli ONNX, PMML, MOJO e H2O con storage su MinIO, metadati su PostgreSQL e cache in memoria per predizioni ad alte prestazioni.
+## 📋 Indice
 
-## 🚀 Architettura
+- [🏗️ Architettura del Sistema](#architettura)
+- [🔐 Sistema di Autenticazione](#autenticazione)
+- [🤖 Gestione Modelli ML](#modelli)
+- [⚡ Quick Start](#quick-start)
+- [🛡️ Sicurezza e Permessi](#sicurezza)
+- [📡 API Reference](#api-reference)
+- [🔧 Configurazione](#configurazione)
+- [🐛 Troubleshooting](#troubleshooting)
 
-```mermaid
-graph TB
-    A[Client] --> B[Maverick Controller]
-    B --> C[Memory Cache]
-    B --> D[PostgreSQL Database]
-    B --> E[MinIO Storage]
-    
-    C --> F[Model Registry]
-    F --> G[ONNX Handler]
-    F --> H[PMML Handler]
-    F --> I[MOJO Handler]
-    
-    D --> J[Model Metadata]
-    D --> K[Usage Statistics]
-    E --> L[Model Files]
+---
+
+## 🏗️ Architettura del Sistema {#architettura}
+
+### **Stack Tecnologico**
+- **Backend**: Spring Boot 3.x con Spring Security
+- **Database**: PostgreSQL per metadati e utenti
+- **Storage**: MinIO (S3-compatible) per modelli ML
+- **Cache**: Caffeine per performance
+- **Autenticazione**: JWT stateless
+- **Documenti**: Swagger/OpenAPI 3
+
+### **Componenti Principali**
+```
+📦 Maverick Platform
+├── 🔐 Autenticazione JWT (dual-mode)
+├── 🤖 Engine ML (PMML, ONNX, Scikit-learn)
+├── 💾 Database PostgreSQL
+├── 🗄️ Storage MinIO
+├── 📊 Monitoring & Audit
+└── 📚 API Documentation
 ```
 
 ---
 
-## 📋 API Reference
+## � Sistema di Autenticazione {#autenticazione}
 
-### 🔄 **Gestione Ciclo di Vita Modelli**
+### **Autenticazione Duale**
 
-#### 1. **Upload Modello**
-```http
-POST /api/v1/maverick/upload
-Content-Type: multipart/form-data
+#### **1. Utenti Umani** (Web/App)
+- **Metodo**: Username + Password
+- **Token TTL**: 15 minuti (configurabile)
+- **Ruoli**: ADMIN, PREDICTOR
+- **Endpoint**: `POST /api/auth/login`
+
+#### **2. Client API** (Machine-to-Machine)
+- **Metodo**: Client ID + Client Secret
+- **Token TTL**: 24 ore (configurabile) 
+- **Accessi**: Admin completo o Solo predizioni
+- **Endpoint**: `POST /api/auth/token`
+
+### **🔑 Credenziali di Test**
+
+| Tipo | Username/Client ID | Password/Secret | Ruolo | Accesso |
+|------|-------------------|-----------------|-------|---------|
+| **Utente** | `admin` | `password` | ADMIN | Completo |
+| **Utente** | `test` | `test123` | PREDICTOR | Solo predizioni |
+| **Client** | `test-admin-client` | `admin123` | ADMIN | Completo |
+| **Client** | `test-predictor-client` | `predictor123` | PREDICTOR | Solo predizioni |
+
+### **🎯 Controllo Accessi**
+
+#### **Solo ADMIN**
+- Upload/cancellazione modelli
+- Gestione utenti e client
+- Monitoring e audit completo
+- Configurazione sistema
+
+#### **ADMIN + PREDICTOR**
+- Predizioni su modelli
+- Visualizzazione schema input/output
+- Lista modelli disponibili
+- Informazioni modelli
+
+---
+
+## 🤖 Gestione Modelli ML {#modelli}
+
+### **Formati Supportati**
+- **PMML**: Predictive Model Markup Language
+- **ONNX**: Open Neural Network Exchange
+- **Scikit-learn**: Pickle serialization (.pkl)
+
+### **Ciclo di Vita Modello**
+1. **Upload**: Caricamento su MinIO + metadati in DB
+2. **Bootstrap**: Caricamento automatico in memoria
+3. **Predizione**: Inferenza real-time
+4. **Monitoring**: Tracking utilizzo e performance
+5. **Gestione**: Versioning e deprecazione
+
+### **Storage e Metadata**
+```sql
+-- Struttura principale ModelEntity
+{
+  "modelName": "iris-classifier",
+  "version": "1.0.0", 
+  "type": "PMML",
+  "storageType": "MINIO",
+  "filePath": "iris-classifier/1.0.0/model.pmml",
+  "uploadTimestamp": "2024-08-06T14:30:00Z",
+  "isActive": true,
+  "inputSchema": {...},
+  "outputSchema": {...}
+}
 ```
 
-Carica modello su MinIO e salva metadati nel database (stato: **inattivo**).
+---
 
-**Parametri:**
-- `file` (MultipartFile) - File modello (max 100MB)
-- `modelName` (String) - Nome modello
-- `version` (String) - Versione (es: v1.0)
-- `type` (String) - ONNX|PMML|MOJO|H2O
-- `description` (String, opz) - Descrizione
+## ⚡ Quick Start {#quick-start}
 
-**Esempio:**
+### **1. Setup Database**
 ```bash
-curl -X POST -F "file=@model.onnx" -F "modelName=iris-classifier" -F "version=v1.0" -F "type=ONNX" -F "description=Iris classification model" \
-  http://localhost:8080/api/v1/maverick/upload
+# Esegui setup completo
+psql -h localhost -d maverickDB -U maverick -f database/setup_auth_database.sql
+
+# Inserisci dati di test
+psql -h localhost -d maverickDB -U maverick -f database/simple_test_data.sql
 ```
 
-**Risposta:**
-```json
+### **2. Configurazione**
+```properties
+# application.properties
+maverick.security.enabled=true
+maverick.jwt.secret=your-production-secret
+maverick.jwt.user-expiration=900000
+maverick.jwt.client-expiration=86400000
+
+# Storage MinIO
+maverick.storage.provider=minio
+maverick.storage.minio.endpoint=http://localhost:9000
+maverick.storage.minio.access-key=your-access-key
+maverick.storage.minio.secret-key=your-secret-key
+```
+
+### **3. Avvio Applicazione**
+```bash
+mvn spring-boot:run
+```
+
+### **4. Test Autenticazione**
+```bash
+# Login utente
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}'
+
+# Risposta con token
 {
-  "status": "SUCCESS",
-  "message": "Modello caricato su MinIO e salvato nel database con successo",
-  "modelName": "iris-classifier",
-  "version": "v1.0",
-  "modelUuid": "550e8400-e29b-41d4-a716-446655440000",
-  "minioPath": "iris-classifier/v1.0/model.onnx",
-  "fileSize": 2048576,
-  "createdAt": "2025-08-06T10:30:00",
-  "isActive": false,
-  "timestamp": "2025-08-06T10:30:00"
+  "token": "eyJhbGciOiJIUzUxMiJ9...",
+  "tokenType": "Bearer",
+  "expiresIn": 900,
+  "username": "admin",
+  "email": "admin@maverick.com",
+  "role": "ADMIN"
 }
 ```
 
-#### 2. **Attiva Modello**
-```http
-POST /api/v1/maverick/load?modelName=iris-classifier&version=v1.0
+### **5. Test Predizione**
+```bash
+# Usa il token ottenuto
+curl -X POST http://localhost:8080/api/v1/maverick/predict/1.0/iris-classifier \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"data": [5.1, 3.5, 1.4, 0.2]}'
 ```
-
-Carica modello da MinIO in memoria e lo attiva nel database.
-
-**Risposta:**
-```json
-{
-  "status": "SUCCESS",
-  "message": "Modello caricato e attivato con successo in memoria",
-  "modelName": "iris-classifier",
-  "version": "v1.0",
-  "type": "ONNX",
-  "fileSize": 2048576,
-  "minioPath": "iris-classifier/v1.0/model.onnx",
-  "loadedAt": "2025-08-06T10:35:00",
-  "cached": true,
-  "isActive": true
-}
-```
-
-#### 3. **Predizione**
-```http
-POST /api/v1/maverick/predict?modelName=iris-classifier&version=v1.0
-Content-Type: application/json
-
-{
-  "features": [5.1, 3.5, 1.4, 0.2]
-}
-```
-
-**Risposta:**
-```json
-{
-  "status": "SUCCESS",
-  "prediction": {
-    "class": "setosa",
-    "probability": 0.98,
-    "scores": [0.98, 0.01, 0.01]
-  },
-  "modelName": "iris-classifier",
-  "version": "v1.0",
-  "executionTimeMs": 15,
-  "timestamp": "2025-08-06T10:40:00"
-}
-```
-
-#### 4. **Disattiva Modello**
-```http
-DELETE /api/v1/maverick/remove?modelName=iris-classifier&version=v1.0
-```
-
-Rimuove da memoria e disattiva nel database (file su MinIO rimane).
-
-#### 5. **Elimina Modello**
-```http
-DELETE /api/v1/maverick/delete?modelName=iris-classifier&version=v1.0
-```
-
-Elimina da memoria, database E MinIO completamente.
 
 ---
 
-### 📊 **Schema e Informazioni Modelli**
+## 🛡️ Sicurezza e Permessi {#sicurezza}
 
-#### 6. **Schema di Input Specifico**
-```http
-GET /api/v1/maverick/models/{modelName}/versions/{version}/input-schema
+### **Architettura di Sicurezza**
+- **Stateless JWT**: Nessuna sessione server-side
+- **Role-based Access**: Controlli granulari per endpoint
+- **Database verification**: Verifica ruoli in tempo reale
+- **Token expiration**: TTL configurabile per sicurezza
+- **BCrypt hashing**: Password sicure (costo 10-12)
+
+### **Endpoint Security Mapping**
+
+| Endpoint | Metodo | Accesso Richiesto |
+|----------|--------|-------------------|
+| `/api/auth/**` | ALL | Pubblico |
+| `/api/v1/maverick/upload` | POST | ADMIN |
+| `/api/v1/maverick/delete` | DELETE | ADMIN |
+| `/api/v1/maverick/predict/**` | POST | ADMIN + PREDICTOR |
+| `/api/v1/maverick/models/*/input-schema` | GET | ADMIN + PREDICTOR |
+| `/swagger-ui/**` | GET | Pubblico (dev) |
+
+### **Processo di Autenticazione**
+```mermaid
+sequenceDiagram
+    Client->>+AuthController: POST /api/auth/login
+    AuthController->>+UserService: authenticateUser()
+    UserService->>+Database: findByUsername()
+    UserService->>+BCrypt: matches(password, hash)
+    UserService-->>-AuthController: UserEntity
+    AuthController->>+JwtUtil: createUserToken()
+    AuthController-->>-Client: JWT Token
+    
+    Client->>+API: Request with Authorization Header
+    JwtFilter->>+JwtUtil: validateToken()
+    JwtFilter->>+UserService: getUserRole()
+    JwtFilter->>+SecurityContext: setAuthentication()
+    API-->>-Client: Protected Resource
 ```
 
-Restituisce informazioni dettagliate sui parametri di input richiesti da un modello specifico.
+---
 
-**Risposta:**
+## 📡 API Reference {#api-reference}
+
+### **Autenticazione Endpoints**
+
+#### **POST /api/auth/login**
+Login utente umano
 ```json
+// Request
 {
-  "status": "SUCCESS",
-  "message": "Schema di input recuperato con successo",
-  "inputSchema": {
-    "modelType": "ONNX",
-    "totalInputs": 1,
-    "inputNames": ["features"],
-    "expectedFeatures": 4,
-    "featureNames": ["sepal_length", "sepal_width", "petal_length", "petal_width"],
-    "featureTypes": ["float32", "float32", "float32", "float32"],
-    "inputShape": [1, 4],
-    "description": "float32 tensor with shape [1, 4]",
-    "supervised": true,
-    "outputClasses": 3,
-    "labelMapping": {"0": "setosa", "1": "versicolor", "2": "virginica"},
-    "inputExample": {
-      "features": [5.1, 3.5, 1.4, 0.2]
-    }
-  },
-  "timestamp": "2025-08-06T..."
+  "username": "admin",
+  "password": "password"
+}
+
+// Response 200
+{
+  "token": "eyJ...",
+  "tokenType": "Bearer",
+  "expiresIn": 900,
+  "username": "admin",
+  "email": "admin@maverick.com", 
+  "role": "ADMIN"
 }
 ```
 
-#### 7. **Informazioni Complete Modello**
-```http
-GET /api/v1/maverick/models/{modelName}/versions/{version}/info
+#### **POST /api/auth/token**
+Autenticazione client API
+```json
+// Request
+{
+  "clientId": "test-admin-client",
+  "clientSecret": "admin123",
+  "grantType": "client_credentials"
+}
+
+// Response 200
+{
+  "accessToken": "eyJ...",
+  "tokenType": "Bearer", 
+  "expiresIn": 86400,
+  "scope": "upload,predict,schema,manage"
+}
 ```
 
-Restituisce metadati completi, schema di input, informazioni di output e esempi di utilizzo.
+#### **POST /api/auth/validate**
+Validazione token
+```bash
+# Headers
+Authorization: Bearer eyJ...
 
-**Risposta:**
+# Response 200: Token valido
+# Response 401: Token invalido/scaduto
+```
+
+#### **GET /api/auth/me**
+Informazioni utente corrente
 ```json
+// Response per utente umano
 {
-  "status": "SUCCESS",
-  "message": "Informazioni modello recuperate con successo",
+  "username": "admin",
+  "email": "admin@maverick.com",
+  "role": "ADMIN", 
+  "userType": "HUMAN"
+}
+
+// Response per client API
+{
+  "clientId": "test-admin-client",
+  "role": "ADMIN",
+  "userType": "MACHINE"
+}
+```
+
+### **Modelli ML Endpoints**
+
+#### **POST /api/v1/maverick/upload** 🔒 ADMIN
+Upload nuovo modello
+
+```bash
+curl -X POST http://localhost:8080/api/v1/maverick/upload \
+  -H "Authorization: Bearer TOKEN" \
+  -F "file=@model.pmml" \
+  -F "modelName=iris-classifier" \
+  -F "version=2.0.0" \
+  -F "type=PMML" \
+  -F "description=Updated iris classifier"
+```
+
+#### **POST /api/v1/maverick/predict/{version}/{modelName}** 🔒 ADMIN/PREDICTOR
+Esegui predizione
+```json
+// Request
+{
+  "data": [5.1, 3.5, 1.4, 0.2]
+}
+
+// Response
+{
+  "prediction": "setosa",
+  "confidence": 0.95,
   "modelInfo": {
-    "modelName": "iris-classifier",
-    "version": "v1.0",
-    "type": "ONNX",
-    "hasLabelMapping": true,
-    "labelMapping": {"0": "setosa", "1": "versicolor", "2": "virginica"},
-    "inputSchema": {
-      "modelType": "ONNX",
-      "totalInputs": 1,
-      "expectedFeatures": 4,
-      "featureNames": ["sepal_length", "sepal_width", "petal_length", "petal_width"],
-      "description": "float32 tensor with shape [1, 4]"
+    "name": "iris-classifier",
+    "version": "1.0.0", 
+    "type": "PMML"
+  },
+  "executionTime": 45
+}
+```
+
+#### **GET /api/v1/maverick/models/{modelName}/versions/{version}/input-schema** 🔒 ADMIN/PREDICTOR
+Schema input modello
+```json
+{
+  "modelName": "iris-classifier",
+  "version": "1.0.0",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "sepal_length": {"type": "number"},
+      "sepal_width": {"type": "number"},
+      "petal_length": {"type": "number"}, 
+      "petal_width": {"type": "number"}
     },
-    "databaseInfo": {
-      "uploadedAt": "2025-08-06T10:30:00",
-      "filePath": "iris-classifier/v1.0/model.onnx",
-      "fileSize": 2048576,
-      "isActive": true,
-      "description": "Iris classification model",
-      "predictionCount": 147,
-      "lastUsedAt": "2025-08-06T15:45:00"
-    }
-  },
-  "storageProvider": "MinIO",
-  "timestamp": "2025-08-06T..."
+    "required": ["sepal_length", "sepal_width", "petal_length", "petal_width"]
+  }
 }
 ```
 
-#### 8. **Schema di Tutti i Modelli**
-```http
-GET /api/v1/maverick/models/schemas
+#### **DELETE /api/v1/maverick/delete** 🔒 ADMIN
+Cancella modello
+```bash
+curl -X DELETE "http://localhost:8080/api/v1/maverick/delete?modelName=iris&version=1.0&deleteFromStorage=true" \
+  -H "Authorization: Bearer TOKEN"
 ```
 
-Restituisce una panoramica degli schemi di input/output di tutti i modelli caricati in memoria.
-
-**Risposta:**
+#### **GET /api/v1/maverick/models-database** 🔒 ADMIN
+Lista modelli nel database
 ```json
 {
-  "status": "SUCCESS",
-  "message": "Schema di tutti i modelli recuperati con successo",
-  "totalModels": 3,
-  "modelsSchemas": {
-    "iris-classifier_v1.0": {
-      "modelName": "iris-classifier",
-      "version": "v1.0",
-      "type": "ONNX",
-      "hasLabelMapping": true,
-      "inputSchema": {
-        "modelType": "ONNX",
-        "totalInputs": 1,
-        "inputNames": ["features"],
-        "expectedFeatures": 4,
-        "supervised": true,
-        "outputClasses": 3,
-        "labelMapping": {"0": "setosa", "1": "versicolor", "2": "virginica"}
-      }
-    },
-    "fraud-detector_v2.1": {
-      "modelName": "fraud-detector",
-      "version": "v2.1",
-      "type": "MOJO",
-      "hasLabelMapping": false,
-      "inputSchema": {
-        "modelType": "MOJO",
-        "totalFeatures": 15,
-        "featureNames": ["amount", "time", "v1", "v2"],
-        "supervised": true,
-        "outputClasses": 2
-      }
-    }
-  },
-  "storageProvider": "MinIO",
-  "timestamp": "2025-08-06T..."
-}
-```
-
----
-
-### 📋 **Listing e Monitoraggio**
-
-#### 9. **Lista Modelli in Memoria**
-```http
-GET /api/v1/maverick/models-in-memory
-```
-
-**Risposta:**
-```json
-{
-  "status": "SUCCESS",
-  "message": "Lista modelli in memoria recuperata con successo",
-  "models": [
-    {
-      "modelName": "iris-classifier",
-      "version": "v1.0",
-      "type": "ONNX",
-      "key": "iris-classifier_v1.0",
-      "hasHandler": true,
-      "hasLabelMapping": true
-    }
-  ],
-  "statistics": {
-    "totalModels": 1,
-    "modelTypes": ["ONNX"],
-    "uniqueModelNames": 1
-  },
-  "timestamp": "2025-08-06T..."
-}
-```
-
-#### 10. **Lista Modelli Database**
-```http
-GET /api/v1/maverick/models-database?page=0&size=10
-```
-
-**Risposta:**
-```json
-{
-  "status": "SUCCESS",
-  "message": "Lista modelli nel database recuperata con successo",
   "models": [
     {
       "id": 1,
-      "modelUuid": "550e8400-e29b-41d4-a716-446655440000",
       "modelName": "iris-classifier",
-      "version": "v1.0",
-      "type": "ONNX",
-      "description": "Iris classification model",
-      "filePath": "iris-classifier/v1.0/model.onnx",
-      "fileSize": 2048576,
+      "version": "1.0.0",
+      "type": "PMML",
+      "uploadTimestamp": "2024-08-06T14:30:00Z",
       "isActive": true,
-      "predictionCount": 147,
-      "lastUsedAt": "2025-08-06T15:45:00",
-      "createdAt": "2025-08-06T10:30:00"
+      "fileSize": 15420
     }
   ],
   "pagination": {
+    "page": 0,
+    "size": 10,
     "totalElements": 1,
-    "totalPages": 1,
-    "currentPage": 0,
-    "pageSize": 10
-  },
-  "statistics": {
-    "totalModels": 1,
-    "activeModels": 1,
-    "modelTypes": ["ONNX"]
+    "totalPages": 1
   }
 }
 ```
 
 ---
 
-### ⚙️ **Operazioni Bootstrap e Audit**
+## 🔧 Configurazione {#configurazione}
 
-#### 11. **Ricarica Modelli Attivi**
-```http
-POST /api/v1/maverick/bootstrap/reload
+### **Database PostgreSQL**
+```sql
+-- Connessione
+spring.datasource.url=jdbc:postgresql://localhost:5432/maverickDB
+spring.datasource.username=maverick
+spring.datasource.password=your-password
+
+-- Pool connessioni
+spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.minimum-idle=5
 ```
 
-Ricarica tutti i modelli attivi dal database in memoria.
+### **Storage MinIO**
+```properties
+# Configurazione MinIO
+maverick.storage.provider=minio
+maverick.storage.minio.endpoint=http://localhost:9000
+maverick.storage.minio.access-key=minio-user
+maverick.storage.minio.secret-key=minio-password
+maverick.storage.minio.default-bucket=maverick
+maverick.storage.minio.use-ssl=false
+```
 
-**Risposta:**
-```json
-{
-  "status": "SUCCESS",
-  "message": "Ricaricamento modelli completato",
-  "before": {
-    "databaseActive": 3,
-    "memoryCache": 2
-  },
-  "after": {
-    "memoryCache": 3
+### **Sicurezza JWT**
+```properties
+# JWT Configuration
+maverick.security.enabled=true
+maverick.jwt.secret=maverick-super-secret-key-change-in-production
+maverick.jwt.user-expiration=900000      # 15 minuti
+maverick.jwt.client-expiration=86400000  # 24 ore
+```
+
+### **Cache Performance**
+```properties
+# Caffeine Cache
+spring.cache.type=caffeine
+spring.cache.caffeine.spec=maximumSize=1000,expireAfterWrite=5m
+spring.cache.cache-names=userRoles,clientRoles,modelSchemas
+```
+
+### **Logging e Monitoring**
+```properties
+# Logging levels
+logging.level.com.maiolix.maverick.security=DEBUG
+logging.level.com.maiolix.maverick.service=INFO
+logging.level.org.springframework.security=WARN
+
+# Actuator endpoints
+management.endpoints.web.exposure.include=health,info,metrics
+management.endpoint.health.show-details=when-authorized
+```
+
+---
+
+## 🐛 Troubleshooting {#troubleshooting}
+
+### **Problemi Comuni**
+
+#### **❌ Errore: "permission denied for table users"**
+```bash
+# Soluzione: Assegna permessi database
+psql -h localhost -d maverickDB -U postgres
+GRANT ALL PRIVILEGES ON TABLE users TO maverick;
+GRANT ALL PRIVILEGES ON TABLE api_clients TO maverick;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO maverick;
+```
+
+#### **❌ Errore: "Failed login attempt"**
+```bash
+# Debug: Verifica password hash
+curl http://localhost:8080/api/debug/test-passwords
+
+# Rigenera utenti di test
+psql -h localhost -d maverickDB -U maverick -f database/simple_test_data.sql
+```
+
+#### **❌ Errore: "Circular dependency between beans"**
+```java
+// Soluzione: Verificare che CryptoConfig sia separato da SecurityConfig
+@Configuration
+public class CryptoConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(10);
+    }
+}
+```
+
+#### **❌ Errore: "MinIO connection failed"**
+```bash
+# Verifica MinIO in esecuzione
+docker ps | grep minio
+
+# Test connessione
+curl http://localhost:9000/minio/health/live
+```
+
+#### **❌ Errore: "Token expired"**
+```bash
+# Rinnova token
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}'
+```
+
+### **Debug Endpoints** (Solo sviluppo)
+```bash
+# Genera hash password
+curl -X POST "http://localhost:8080/api/debug/hash-password?password=mypassword"
+
+# Verifica hash
+curl -X POST "http://localhost:8080/api/debug/verify-password?password=test&hash=\$2b\$10\$..."
+
+# Test password predefinite  
+curl http://localhost:8080/api/debug/test-passwords
+```
+
+### **Health Checks**
+```bash
+# Status applicazione
+curl http://localhost:8080/actuator/health
+
+# Info sistema
+curl http://localhost:8080/actuator/info
+
+
   },
   "reloadedAt": "2025-08-06T16:00:00"
 }
