@@ -8,9 +8,10 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import com.maiolix.maverick.entity.ModelEntity;
+import com.maiolix.maverick.exception.ModelBootstrapException;
 import com.maiolix.maverick.handler.IModelHandler;
 import com.maiolix.maverick.registry.ModelRegistry;
-import com.maiolix.maverick.repository.MinioModelRepository;
+import com.maiolix.maverick.repository.IModelStorageRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ModelBootstrapService {
 
     private final ModelDatabaseService modelDatabaseService;
-    private final MinioModelRepository minioRepository;
+    private final IModelStorageRepository storageRepository;
     private final IModelService modelService;
 
     /**
@@ -114,10 +115,10 @@ public class ModelBootstrapService {
             return;
         }
         
-        // === DOWNLOAD DA MINIO ===
-        log.debug("📥 Download modello da MinIO: {}", model.getFilePath());
+        // === DOWNLOAD DA STORAGE ===
+        log.debug("📥 Download modello da {}: {}", storageRepository.getProviderType().getDisplayName(), model.getFilePath());
         
-        try (InputStream modelStream = minioRepository.downloadModel(model.getFilePath())) {
+        try (InputStream modelStream = storageRepository.downloadModel(model.getFilePath())) {
             
             // === CREAZIONE HANDLER ===
             Object handler = modelService.createModelHandler(modelStream, model.getType().toString());
@@ -128,7 +129,7 @@ public class ModelBootstrapService {
             log.debug("🧠 Modello {} v{} registrato in memoria", modelName, version);
             
         } catch (Exception e) {
-            throw new RuntimeException("Errore caricamento modello " + modelName + " v" + version, e);
+            throw new ModelBootstrapException("Errore caricamento modello " + modelName + " v" + version, e);
         }
     }
 

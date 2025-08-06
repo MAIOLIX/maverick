@@ -5,6 +5,8 @@ import java.io.InputStream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 
+import com.maiolix.maverick.exception.StorageOperationException;
+
 import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
@@ -13,12 +15,12 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Repository MinIO per la gestione dei modelli ML
+ * Implementazione MinIO del repository per la gestione dei modelli ML
  * Struttura: bucket/modello/versione/file
  */
 @Repository
 @Slf4j
-public class MinioModelRepository {
+public class MinioModelRepository implements IModelStorageRepository {
 
     @Value("${maverick.storage.minio.endpoint}")
     private String endpoint;
@@ -51,7 +53,7 @@ public class MinioModelRepository {
             
         } catch (Exception e) {
             log.error("❌ Errore inizializzazione MinIO: {}", e.getMessage(), e);
-            throw new RuntimeException("Impossibile inizializzare MinIO client", e);
+            throw new StorageOperationException("Impossibile inizializzare MinIO client", e, "MINIO");
         }
     }
 
@@ -74,7 +76,7 @@ public class MinioModelRepository {
             }
         } catch (Exception e) {
             log.error("❌ Errore creazione bucket '{}': {}", bucketName, e.getMessage());
-            throw new RuntimeException("Impossibile creare bucket: " + bucketName, e);
+            throw new StorageOperationException("Impossibile creare bucket: " + bucketName, e, "MINIO");
         }
     }
 
@@ -108,7 +110,7 @@ public class MinioModelRepository {
             
         } catch (Exception e) {
             log.error("❌ Errore upload modello {}/{}: {}", modelName, version, e.getMessage(), e);
-            throw new RuntimeException("Upload modello fallito: " + modelName + "/" + version, e);
+            throw new StorageOperationException("Upload modello fallito: " + modelName + "/" + version, e, "MINIO");
         }
     }
 
@@ -129,7 +131,7 @@ public class MinioModelRepository {
             log.info("✅ Connessione MinIO OK");
         } catch (Exception e) {
             log.error("❌ Test connessione MinIO fallito: {}", e.getMessage());
-            throw new RuntimeException("Connessione MinIO fallita", e);
+            throw new StorageOperationException("Connessione MinIO fallita", e, "MINIO");
         }
     }
 
@@ -140,6 +142,11 @@ public class MinioModelRepository {
 
     public String getEndpoint() {
         return endpoint;
+    }
+
+    @Override
+    public StorageProviderType getProviderType() {
+        return StorageProviderType.MINIO;
     }
 
     /**
@@ -157,7 +164,7 @@ public class MinioModelRepository {
                     
         } catch (Exception e) {
             log.error("❌ Errore download modello {}: {}", objectPath, e.getMessage(), e);
-            throw new RuntimeException("Errore download modello: " + e.getMessage(), e);
+            throw new StorageOperationException("Errore download modello: " + e.getMessage(), e, "MINIO");
         }
     }
 

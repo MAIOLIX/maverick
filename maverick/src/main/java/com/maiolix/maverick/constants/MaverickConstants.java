@@ -18,6 +18,9 @@ public final class MaverickConstants {
     public static final String FILE_SIZE = "fileSize";
     public static final String IS_ACTIVE = "isActive";
     public static final String STATISTICS = "statistics";
+    
+    // === OBJECT ATTRIBUTES ===
+    public static final String MODEL_STATUS = "status"; // Per attributo status degli oggetti
 
     // === STATUS VALUES ===
     public static final String SUCCESS = "SUCCESS";

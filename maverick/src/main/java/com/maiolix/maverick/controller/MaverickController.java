@@ -24,7 +24,7 @@ import com.maiolix.maverick.exception.ModelPredictionException;
 import com.maiolix.maverick.exception.ModelUploadException;
 import com.maiolix.maverick.handler.IModelHandler;
 import com.maiolix.maverick.registry.ModelRegistry;
-import com.maiolix.maverick.repository.MinioModelRepository;
+import com.maiolix.maverick.repository.IModelStorageRepository;
 import com.maiolix.maverick.service.IModelService;
 import com.maiolix.maverick.service.ModelBootstrapService;
 import com.maiolix.maverick.service.ModelDatabaseService;
@@ -47,7 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 public class MaverickController {
 
     private final ModelDatabaseService modelDatabaseService;
-    private final MinioModelRepository minioRepository;
+    private final IModelStorageRepository storageRepository;
     private final IModelService modelService;
     private final ModelBootstrapService modelBootstrapService;
 
@@ -82,9 +82,9 @@ public class MaverickController {
             String fileName = file.getOriginalFilename();
             String contentType = file.getContentType();
             
-            // === UPLOAD SU MINIO ===
-            log.info("📤 Caricamento su MinIO: {}/{}/{}", modelName, version, fileName);
-            minioRepository.uploadModel(modelName, version, fileName, 
+            // === UPLOAD SU STORAGE ===
+            log.info("📤 Caricamento su {}: {}/{}/{}", storageRepository.getProviderType().getDisplayName(), modelName, version, fileName);
+            storageRepository.uploadModel(modelName, version, fileName, 
                                       file.getInputStream(), file.getSize(), contentType);
             
             // === CALCOLO HASH PER INTEGRITÀ ===
@@ -98,7 +98,7 @@ public class MaverickController {
                     .description(description)
                     .storageType(ModelEntity.StorageType.MINIO)
                     .filePath(modelName + "/" + version + "/" + fileName)
-                    .bucketName(minioRepository.getDefaultBucket())
+                    .bucketName(storageRepository.getDefaultBucket())
                     .fileSize(file.getSize())
                     .fileHash(fileHash)
                     .contentType(contentType)
@@ -122,7 +122,7 @@ public class MaverickController {
             response.put("type", type.toString());
             response.put("fileName", fileName);
             response.put("minioPath", modelName + "/" + version + "/" + fileName);
-            response.put("bucket", minioRepository.getDefaultBucket());
+            response.put("bucket", storageRepository.getDefaultBucket());
             response.put(MaverickConstants.FILE_SIZE, file.getSize());
             response.put("fileHash", fileHash);
             response.put(MaverickConstants.IS_ACTIVE, false);
@@ -239,7 +239,7 @@ public class MaverickController {
             }
             
             // === CARICAMENTO REALE IN MEMORIA ===
-            log.info("📥 Download modello da MinIO: {}", modelEntity.getFilePath());
+            log.info("📥 Download modello da {}: {}", storageRepository.getProviderType().getDisplayName(), modelEntity.getFilePath());
             
             loadModelIntoMemoryCache(modelName, version, modelEntity);
             
@@ -302,21 +302,21 @@ public class MaverickController {
             modelDatabaseService.saveModel(modelEntity);
             
             if (removed) {
-                response.put("status", "SUCCESS");
-                response.put("message", "Modello rimosso dalla memoria e disattivato con successo");
-                response.put("modelName", modelName);
-                response.put("version", version);
+                response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+                response.put(MaverickConstants.MESSAGE, "Modello rimosso dalla memoria e disattivato con successo");
+                response.put(MaverickConstants.MODEL_NAME, modelName);
+                response.put(MaverickConstants.VERSION, version);
                 response.put("removedAt", System.currentTimeMillis());
-                response.put("isActive", false);
+                response.put(MaverickConstants.IS_ACTIVE, false);
                 
                 log.info("✅ Modello {} v{} rimosso dalla memoria e disattivato nel database", modelName, version);
             } else {
-                response.put("status", "SUCCESS");
-                response.put("message", "Modello non era in memoria ma è stato disattivato nel database");
-                response.put("modelName", modelName);
-                response.put("version", version);
+                response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+                response.put(MaverickConstants.MESSAGE, "Modello non era in memoria ma è stato disattivato nel database");
+                response.put(MaverickConstants.MODEL_NAME, modelName);
+                response.put(MaverickConstants.VERSION, version);
                 response.put("removedAt", System.currentTimeMillis());
-                response.put("isActive", false);
+                response.put(MaverickConstants.IS_ACTIVE, false);
                 
                 log.warn("⚠️ Modello {} v{} non era in memoria, ma disattivato nel database", modelName, version);
             }
@@ -358,12 +358,12 @@ public class MaverickController {
             modelDatabaseService.recordPrediction(modelEntity.getId());
             
             // === RISPOSTA ===
-            response.put("status", "SUCCESS");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
             response.put("prediction", prediction);
-            response.put("modelName", modelName);
-            response.put("version", version);
+            response.put(MaverickConstants.MODEL_NAME, modelName);
+            response.put(MaverickConstants.VERSION, version);
             response.put("executionTimeMs", executionTime);
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             log.info("✅ Predizione completata in {}ms: {} v{}", executionTime, modelName, version);
             
@@ -467,34 +467,19 @@ public class MaverickController {
             boolean dbDeleted = false;
             
             // === 1. RIMOZIONE DALLA MEMORIA ===
-            try {
-                memoryRemoved = modelService.removeModel(modelName, version);
-                log.info("🧠 Memoria: {}", memoryRemoved ? "rimosso" : "non era presente");
-            } catch (Exception e) {
-                log.warn("⚠️ Errore rimozione dalla memoria: {}", e.getMessage());
-            }
+            memoryRemoved = removeModelFromMemory(modelName, version);
             
-            // === 2. ELIMINAZIONE DA MINIO ===
-            try {
-                minioDeleted = minioRepository.deleteModel(modelEntity.getFilePath());
-                log.info("📦 MinIO: {}", minioDeleted ? "eliminato" : "errore eliminazione");
-            } catch (Exception e) {
-                log.warn("⚠️ Errore eliminazione da MinIO: {}", e.getMessage());
-            }
+            // === 2. ELIMINAZIONE DA STORAGE ===
+            minioDeleted = deleteModelFromStorage(modelEntity.getFilePath());
             
             // === 3. ELIMINAZIONE DAL DATABASE ===
-            try {
-                dbDeleted = modelDatabaseService.deleteModel(modelName, version);
-                log.info("💾 Database: {}", dbDeleted ? "eliminato" : "errore eliminazione");
-            } catch (Exception e) {
-                log.warn("⚠️ Errore eliminazione dal database: {}", e.getMessage());
-            }
+            dbDeleted = deleteModelFromDatabase(modelName, version);
             
             // === RISPOSTA DETTAGLIATA ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Eliminazione modello completata");
-            response.put("modelName", modelName);
-            response.put("version", version);
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Eliminazione modello completata");
+            response.put(MaverickConstants.MODEL_NAME, modelName);
+            response.put(MaverickConstants.VERSION, version);
             response.put("deletedAt", System.currentTimeMillis());
             response.put("operations", Map.of(
                 "memoryRemoved", memoryRemoved,
@@ -551,7 +536,7 @@ public class MaverickController {
                     modelInfo.put("storageType", model.getStorageType().toString());
                     modelInfo.put("bucketName", model.getBucketName());
                     modelInfo.put("isActive", model.getIsActive());
-                    modelInfo.put("status", model.getStatus().toString());
+                    modelInfo.put(MaverickConstants.MODEL_STATUS, model.getStatus().toString());
                     modelInfo.put("predictionCount", model.getPredictionCount());
                     modelInfo.put("lastUsedAt", model.getLastUsedAt());
                     modelInfo.put("createdAt", model.getCreatedAt());
@@ -579,8 +564,8 @@ public class MaverickController {
                 .toList());
             
             // === RISPOSTA ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Lista modelli nel database recuperata con successo");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Lista modelli nel database recuperata con successo");
             response.put("models", modelsList);
             response.put("pagination", Map.of(
                 "totalElements", modelsPage.getTotalElements(),
@@ -590,8 +575,8 @@ public class MaverickController {
                 "hasNext", modelsPage.hasNext(),
                 "hasPrevious", modelsPage.hasPrevious()
             ));
-            response.put("statistics", statistics);
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.STATISTICS, statistics);
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             log.info("✅ Lista modelli nel database: {} modelli trovati (pagina {}/{})", 
                     modelsList.size(), page + 1, modelsPage.getTotalPages());
@@ -601,9 +586,9 @@ public class MaverickController {
         } catch (Exception e) {
             log.error("❌ Errore recupero lista modelli dal database: {}", e.getMessage(), e);
             
-            response.put("status", "ERROR");
-            response.put("message", "Errore durante recupero lista modelli dal database: " + e.getMessage());
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante recupero lista modelli dal database: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             return ResponseEntity.status(500).body(response);
         }
@@ -636,8 +621,8 @@ public class MaverickController {
             int newCacheCount = newCachedModels.size();
             
             // === RISPOSTA ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Ricaricamento modelli completato");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Ricaricamento modelli completato");
             response.put("before", Map.of(
                 "databaseActive", dbActiveCount,
                 "memoryCache", cacheCount
@@ -655,9 +640,9 @@ public class MaverickController {
         } catch (Exception e) {
             log.error("❌ Errore ricaricamento modelli: {}", e.getMessage(), e);
             
-            response.put("status", "ERROR");
-            response.put("message", "Errore durante ricaricamento modelli: " + e.getMessage());
-            response.put("timestamp", System.currentTimeMillis());
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante ricaricamento modelli: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, System.currentTimeMillis());
             
             return ResponseEntity.status(500).body(response);
         }
@@ -710,8 +695,8 @@ public class MaverickController {
             statistics.put("extraInCache", extraInCache.size());
             
             // === RISPOSTA ===
-            response.put("status", "SUCCESS");
-            response.put("message", "Audit modelli completato");
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Audit modelli completato");
             response.put("statistics", statistics);
             response.put("details", Map.of(
                 "activeModelsInDb", dbKeys,
@@ -748,8 +733,8 @@ public class MaverickController {
      */
     private void loadModelIntoMemoryCache(String modelName, String version, ModelEntity modelEntity) {
         try {
-            // Download del file da MinIO
-            InputStream modelStream = minioRepository.downloadModel(modelEntity.getFilePath());
+            // Download del file da Storage
+            InputStream modelStream = storageRepository.downloadModel(modelEntity.getFilePath());
             
             // Crea l'handler per il modello
             Object handler = modelService.createModelHandler(modelStream, modelEntity.getType().toString());
@@ -762,6 +747,48 @@ public class MaverickController {
         } catch (Exception e) {
             log.error("❌ Errore creazione handler: {}", e.getMessage(), e);
             throw new ModelUploadException("Impossibile creare handler per il modello: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Rimuove il modello dalla memoria
+     */
+    private boolean removeModelFromMemory(String modelName, String version) {
+        try {
+            boolean removed = modelService.removeModel(modelName, version);
+            log.info("🧠 Memoria: {}", removed ? "rimosso" : "non era presente");
+            return removed;
+        } catch (Exception e) {
+            log.warn("⚠️ Errore rimozione dalla memoria: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Elimina il modello dal storage
+     */
+    private boolean deleteModelFromStorage(String filePath) {
+        try {
+            boolean deleted = storageRepository.deleteModel(filePath);
+            log.info("📦 {}: {}", storageRepository.getProviderType().getDisplayName(), deleted ? "eliminato" : "errore eliminazione");
+            return deleted;
+        } catch (Exception e) {
+            log.warn("⚠️ Errore eliminazione da {}: {}", storageRepository.getProviderType().getDisplayName(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Elimina il modello dal database
+     */
+    private boolean deleteModelFromDatabase(String modelName, String version) {
+        try {
+            boolean deleted = modelDatabaseService.deleteModel(modelName, version);
+            log.info("💾 Database: {}", deleted ? "eliminato" : "errore eliminazione");
+            return deleted;
+        } catch (Exception e) {
+            log.warn("⚠️ Errore eliminazione dal database: {}", e.getMessage());
+            return false;
         }
     }
 }
