@@ -19,6 +19,15 @@ public final class MaverickConstants {
     public static final String IS_ACTIVE = "isActive";
     public static final String STATISTICS = "statistics";
     
+    // === SCHEMA AND METADATA KEYS ===
+    public static final String INPUT_SCHEMA = "inputSchema";
+    public static final String TOTAL_MODELS = "totalModels";
+    public static final String FEATURES = "features";
+    public static final String TOTAL_FEATURES = "totalFeatures";
+    public static final String FEATURE_NAMES = "featureNames";
+    public static final String SUPERVISED = "supervised";
+    public static final String LABEL_MAPPING = "labelMapping";
+    
     // === OBJECT ATTRIBUTES ===
     public static final String MODEL_STATUS = "status"; // Per attributo status degli oggetti
 

@@ -726,6 +726,271 @@ public class MaverickController {
         }
     }
 
+    /**
+     * Ottiene lo schema di input per un modello specifico
+     */
+    @GetMapping("/models/{modelName}/versions/{version}/input-schema")
+    @Operation(summary = "Schema di input del modello", 
+               description = "Restituisce informazioni dettagliate sui parametri di input richiesti dal modello")
+    public ResponseEntity<Map<String, Object>> getModelInputSchema(
+            @Parameter(description = "Nome del modello", required = true) 
+            @PathVariable String modelName,
+            @Parameter(description = "Versione del modello", required = true) 
+            @PathVariable String version) {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("📋 Richiesta schema input per modello: {} versione: {}", modelName, version);
+            
+            // Ottiene lo schema di input dal servizio
+            Object inputSchema = modelService.getInputSchema(modelName, version);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Schema di input recuperato con successo");
+            response.put(MaverickConstants.INPUT_SCHEMA, inputSchema);
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            log.info("✅ Schema input recuperato per modello: {} versione: {}", modelName, version);
+            return ResponseEntity.ok(response);
+            
+        } catch (ModelNotFoundException e) {
+            log.warn("⚠️ Modello non trovato: {} versione: {}", modelName, version);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Modello non trovato: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            return ResponseEntity.status(404).body(response);
+            
+        } catch (Exception e) {
+            log.error("❌ Errore recupero schema input per modello: {} versione: {} - {}", 
+                     modelName, version, e.getMessage(), e);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante il recupero dello schema di input: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /**
+     * Ottiene informazioni complete del modello (metadati + schema input + output)
+     */
+    @GetMapping("/models/{modelName}/versions/{version}/info")
+    @Operation(summary = "Informazioni complete del modello", 
+               description = "Restituisce metadati completi, schema di input, informazioni di output e esempi di utilizzo")
+    public ResponseEntity<Map<String, Object>> getModelInfo(
+            @Parameter(description = "Nome del modello", required = true) 
+            @PathVariable String modelName,
+            @Parameter(description = "Versione del modello", required = true) 
+            @PathVariable String version) {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("ℹ️ Richiesta informazioni complete per modello: {} versione: {}", modelName, version);
+            
+            // Ottiene informazioni complete dal servizio
+            Object modelInfo = modelService.getModelInfo(modelName, version);
+            
+            // Recupera metadati dal database se disponibili
+            addDatabaseInfoToModelInfo(modelInfo, modelName, version);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Informazioni modello recuperate con successo");
+            response.put("modelInfo", modelInfo);
+            response.put("storageProvider", storageRepository.getProviderType().getDisplayName());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            log.info("✅ Informazioni complete recuperate per modello: {} versione: {}", modelName, version);
+            return ResponseEntity.ok(response);
+            
+        } catch (ModelNotFoundException e) {
+            log.warn("⚠️ Modello non trovato: {} versione: {}", modelName, version);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Modello non trovato: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            return ResponseEntity.status(404).body(response);
+            
+        } catch (Exception e) {
+            log.error("❌ Errore recupero informazioni per modello: {} versione: {} - {}", 
+                     modelName, version, e.getMessage(), e);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante il recupero delle informazioni del modello: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /**
+     * Aggiunge le informazioni del database ai metadati del modello
+     */
+    private void addDatabaseInfoToModelInfo(Object modelInfo, String modelName, String version) {
+        try {
+            ModelEntity dbModel = modelDatabaseService.findByNameAndVersion(modelName, version).orElse(null);
+            if (dbModel != null) {
+                Map<String, Object> databaseInfo = new HashMap<>();
+                databaseInfo.put("uploadedAt", dbModel.getCreatedAt());
+                databaseInfo.put("filePath", dbModel.getFilePath());
+                databaseInfo.put("fileSize", dbModel.getFileSize());
+                databaseInfo.put("isActive", dbModel.getIsActive());
+                databaseInfo.put("description", dbModel.getDescription());
+                
+                // Aggiunge le informazioni del database al risultato se modelInfo è una Map
+                if (modelInfo instanceof Map<?, ?> modelInfoMap) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> typedModelInfo = (Map<String, Object>) modelInfoMap;
+                    typedModelInfo.put("databaseInfo", databaseInfo);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("⚠️ Impossibile recuperare metadati database per modello: {} versione: {} - {}", 
+                    modelName, version, e.getMessage());
+        }
+    }
+
+    /**
+     * Ottiene informazioni di input/output per tutti i modelli caricati in memoria
+     */
+    @GetMapping("/models/schemas")
+    @Operation(summary = "Schema di tutti i modelli", 
+               description = "Restituisce una panoramica degli schemi di input/output di tutti i modelli caricati in memoria")
+    public ResponseEntity<Map<String, Object>> getAllModelsSchemas() {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("📊 Richiesta schema di tutti i modelli in memoria");
+            
+            var cachedModels = ModelRegistry.getAllModels();
+            Map<String, Object> modelsSchemas = new HashMap<>();
+            
+            for (var cacheEntry : cachedModels) {
+                String modelKey = cacheEntry.getKey();
+                Map<String, Object> modelSummary = processModelCacheEntry(cacheEntry, modelKey);
+                modelsSchemas.put(modelKey, modelSummary);
+            }
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.SUCCESS);
+            response.put(MaverickConstants.MESSAGE, "Schema di tutti i modelli recuperati con successo");
+            response.put(MaverickConstants.TOTAL_MODELS, cachedModels.size());
+            response.put("modelsSchemas", modelsSchemas);
+            response.put("storageProvider", storageRepository.getProviderType().getDisplayName());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            log.info("✅ Schema di {} modelli recuperati con successo", cachedModels.size());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("❌ Errore recupero schema di tutti i modelli: {}", e.getMessage(), e);
+            
+            response.put(MaverickConstants.STATUS, MaverickConstants.ERROR);
+            response.put(MaverickConstants.MESSAGE, "Errore durante il recupero degli schemi dei modelli: " + e.getMessage());
+            response.put(MaverickConstants.TIMESTAMP, LocalDateTime.now());
+            
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /**
+     * Elabora una entry della cache del modello
+     */
+    private Map<String, Object> processModelCacheEntry(com.maiolix.maverick.registry.ModelCacheEntry cacheEntry, String modelKey) {
+        try {
+            return createModelSummary(cacheEntry, modelKey);
+        } catch (Exception e) {
+            log.warn("⚠️ Errore elaborazione modello {}: {}", modelKey, e.getMessage());
+            Map<String, Object> errorSummary = new HashMap<>();
+            errorSummary.put("modelKey", modelKey);
+            errorSummary.put("error", "Errore elaborazione: " + e.getMessage());
+            return errorSummary;
+        }
+    }
+
+    /**
+     * Crea un sommario delle informazioni del modello
+     */
+    private Map<String, Object> createModelSummary(com.maiolix.maverick.registry.ModelCacheEntry cacheEntry, String modelKey) {
+        String[] keyParts = modelKey.split("_");
+        String modelName = keyParts[0];
+        String version = keyParts.length > 1 ? keyParts[1] : "unknown";
+        
+        Map<String, Object> modelSummary = new HashMap<>();
+        modelSummary.put("modelName", modelName);
+        modelSummary.put("version", version);
+        modelSummary.put("type", cacheEntry.getType());
+        modelSummary.put("hasLabelMapping", cacheEntry.hasLabelMapping());
+        
+        // Ottiene schema di input (versione compatta)
+        Map<String, Object> inputSchema = getCompactInputSchema(cacheEntry, modelKey);
+        modelSummary.put(MaverickConstants.INPUT_SCHEMA, inputSchema);
+        
+        return modelSummary;
+    }
+
+    /**
+     * Ottiene una versione compatta dello schema di input
+     */
+    private Map<String, Object> getCompactInputSchema(com.maiolix.maverick.registry.ModelCacheEntry cacheEntry, String modelKey) {
+        try {
+            Map<String, Object> inputSchema = cacheEntry.getHandler().getInputSchema();
+            Map<String, Object> compactSchema = new HashMap<>();
+            
+            // Informazioni base
+            compactSchema.put("modelType", inputSchema.get("modelType"));
+            compactSchema.put("totalInputs", inputSchema.get("totalInputs"));
+            compactSchema.put("inputNames", inputSchema.get("inputNames"));
+            
+            // Features e output info
+            addFeatureInfoToCompactSchema(compactSchema, inputSchema);
+            addOutputInfoToCompactSchema(compactSchema, inputSchema);
+            
+            return compactSchema;
+        } catch (Exception e) {
+            log.warn("⚠️ Errore recupero schema per modello {}: {}", modelKey, e.getMessage());
+            return Map.of("error", "Impossibile recuperare schema: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Aggiunge informazioni sulle features allo schema compatto
+     */
+    private void addFeatureInfoToCompactSchema(Map<String, Object> compactSchema, Map<String, Object> inputSchema) {
+        if (inputSchema.containsKey(MaverickConstants.FEATURES)) {
+            compactSchema.put(MaverickConstants.FEATURES, inputSchema.get(MaverickConstants.FEATURES));
+        }
+        if (inputSchema.containsKey(MaverickConstants.TOTAL_FEATURES)) {
+            compactSchema.put(MaverickConstants.TOTAL_FEATURES, inputSchema.get(MaverickConstants.TOTAL_FEATURES));
+        }
+        if (inputSchema.containsKey(MaverickConstants.FEATURE_NAMES)) {
+            compactSchema.put(MaverickConstants.FEATURE_NAMES, inputSchema.get(MaverickConstants.FEATURE_NAMES));
+        }
+    }
+
+    /**
+     * Aggiunge informazioni di output allo schema compatto
+     */
+    private void addOutputInfoToCompactSchema(Map<String, Object> compactSchema, Map<String, Object> inputSchema) {
+        if (inputSchema.containsKey(MaverickConstants.SUPERVISED)) {
+            compactSchema.put(MaverickConstants.SUPERVISED, inputSchema.get(MaverickConstants.SUPERVISED));
+        }
+        if (inputSchema.containsKey("nClasses")) {
+            compactSchema.put("outputClasses", inputSchema.get("nClasses"));
+        }
+        if (inputSchema.containsKey("responseClasses")) {
+            compactSchema.put("outputClassNames", inputSchema.get("responseClasses"));
+        }
+        if (inputSchema.containsKey(MaverickConstants.LABEL_MAPPING)) {
+            compactSchema.put(MaverickConstants.LABEL_MAPPING, inputSchema.get(MaverickConstants.LABEL_MAPPING));
+        }
+    }
+
     // === METODI HELPER PRIVATI ===
 
     /**
