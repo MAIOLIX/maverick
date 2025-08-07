@@ -1,0 +1,97 @@
+version: '3.8'
+
+# Docker Compose per deployment VPS
+# Solo container Maverick con configurazione esterna per PostgreSQL e MinIO
+
+services:
+  maverick:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: maverick-app
+    restart: unless-stopped
+    
+    # Porta esposta per il proxy manager
+    ports:
+      - "${MAVERICK_PORT:-8080}:8080"
+    
+    # Configurazione ambiente
+    environment:
+      # Profilo Spring Boot
+      SPRING_PROFILES_ACTIVE: production
+      
+      # Database PostgreSQL esterno
+      DATABASE_URL: "${DATABASE_URL}"
+      DATABASE_USER: "${DATABASE_USER}"
+      DATABASE_PASSWORD: "${DATABASE_PASSWORD}"
+      
+      # MinIO esterno
+      MINIO_ENDPOINT: "${MINIO_ENDPOINT}"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-maverick-models}"
+      MINIO_REGION: "${MINIO_REGION:-us-east-1}"
+      
+      # JWT Security
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_EXPIRATION: "${JWT_EXPIRATION:-86400000}"
+      JWT_REFRESH_EXPIRATION: "${JWT_REFRESH_EXPIRATION:-604800000}"
+      
+      # CORS Configuration
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
+      
+      # Server Configuration
+      PORT: 8080
+      CONTEXT_PATH: "${CONTEXT_PATH:-/}"
+      
+      # Upload Configuration
+      MAX_FILE_SIZE: "${MAX_FILE_SIZE:-100MB}"
+      MAX_REQUEST_SIZE: "${MAX_REQUEST_SIZE:-100MB}"
+      UPLOAD_PATH: "/app/uploads"
+      
+      # JVM Options personalizzabili
+      JAVA_OPTS: "${JAVA_OPTS:-}"
+    
+    # Volumi per persistenza dati
+    volumes:
+      - maverick-uploads:/app/uploads
+      - maverick-logs:/app/logs
+      - maverick-models:/app/models
+    
+    # Limiti risorse
+    deploy:
+      resources:
+        limits:
+          memory: "${MEMORY_LIMIT:-2G}"
+          cpus: "${CPU_LIMIT:-2.0}"
+        reservations:
+          memory: "${MEMORY_RESERVATION:-1G}"
+          cpus: "${CPU_RESERVATION:-1.0}"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    
+    # Labels per organizzazione
+    labels:
+      - "com.maverick.component=backend"
+      - "com.maverick.environment=production"
+
+# Volumi per persistenza dati
+volumes:
+  maverick-uploads:
+    driver: local
+  maverick-logs:
+    driver: local
+  maverick-models:
+    driver: local
+
+# Network (opzionale se serve comunicazione con altri container)
+networks:
+  default:
+    name: maverick-network
+    driver: bridge

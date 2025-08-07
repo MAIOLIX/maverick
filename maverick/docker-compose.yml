@@ -1,0 +1,129 @@
+# Docker Compose per Maverick Platform
+# Include PostgreSQL, MinIO e l'applicazione
+
+version: '3.8'
+
+services:
+  # Database PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: maverick-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: maverickDB
+      POSTGRES_USER: maverick
+      POSTGRES_PASSWORD: Alessandro12
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    networks:
+      - maverick-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maverick -d maverickDB"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: maverick-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - maverick-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Maverick Application
+  maverick-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maverick-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Database Configuration
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/maverickDB
+      SPRING_DATASOURCE_USERNAME: maverick
+      SPRING_DATASOURCE_PASSWORD: Alessandro12
+      
+      # MinIO Configuration
+      MAVERICK_STORAGE_ENDPOINT: http://minio:9000
+      MAVERICK_STORAGE_ACCESS_KEY: minioadmin
+      MAVERICK_STORAGE_SECRET_KEY: minioadmin123
+      MAVERICK_STORAGE_BUCKET_NAME: maverick-models
+      
+      # Swagger Configuration (URL dinamico)
+      SWAGGER_SERVER_URL: http://localhost:8080
+      SWAGGER_SERVER_DESCRIPTION: "Docker Development Server"
+      
+      # JWT Configuration
+      MAVERICK_JWT_SECRET: maverick-docker-secret-key-2024-production-ready
+      
+      # Profile attivo
+      SPRING_PROFILES_ACTIVE: docker
+      
+      # JVM Options
+      JAVA_OPTS: -Xmx1g -Xms512m
+    volumes:
+      - app_logs:/app/logs
+      - app_models:/app/models
+    networks:
+      - maverick-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Nginx Reverse Proxy (opzionale)
+  nginx:
+    image: nginx:alpine
+    container_name: maverick-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - maverick-app
+    networks:
+      - maverick-network
+
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  app_logs:
+    driver: local
+  app_models:
+    driver: local
+
+networks:
+  maverick-network:
+    driver: bridge

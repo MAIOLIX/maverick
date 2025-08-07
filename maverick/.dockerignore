@@ -1,0 +1,51 @@
+# File e directory da escludere dal build context Docker
+
+# Target e build artifacts
+target/
+!target/*.jar
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Test files
+src/test/
+
+# Docker files (evita loop)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Environment files
+.env
+.env.local
+
+# Node modules (se ci fossero)
+node_modules/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Logs
+logs/
+*.log

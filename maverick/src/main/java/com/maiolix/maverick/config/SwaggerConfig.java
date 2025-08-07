@@ -23,12 +23,38 @@ public class SwaggerConfig {
     @Value("${server.port:8080}")
     private String serverPort;
 
+    @Value("${swagger.server.url:}")
+    private String swaggerServerUrl;
+
+    @Value("${swagger.server.description:Development Server}")
+    private String swaggerServerDescription;
+
     @Bean
     public OpenAPI customOpenAPI() {
-        Server server = new Server();
-        server.setUrl("http://localhost:" + serverPort);
-        server.setDescription("Development Server");
+        OpenAPI openAPI = new OpenAPI()
+                .info(buildInfo())
+                .components(buildComponents())
+                .addSecurityItem(buildSecurityRequirement());
 
+        // Configurazione server dinamica per Docker
+        if (!swaggerServerUrl.isEmpty()) {
+            // URL specifico configurato (produzione/Docker)
+            Server server = new Server();
+            server.setUrl(swaggerServerUrl);
+            server.setDescription(swaggerServerDescription);
+            openAPI.servers(List.of(server));
+        } else {
+            // Auto-detect per sviluppo locale
+            Server localServer = new Server();
+            localServer.setUrl("http://localhost:" + serverPort);
+            localServer.setDescription("Development Server");
+            openAPI.servers(List.of(localServer));
+        }
+
+        return openAPI;
+    }
+
+    private Info buildInfo() {
         Contact contact = new Contact();
         contact.setEmail("contact@maiolix.com");
         contact.setName("Maiolix Team");
@@ -38,7 +64,7 @@ public class SwaggerConfig {
         license.setName("Apache 2.0");
         license.setUrl("https://www.apache.org/licenses/LICENSE-2.0");
 
-        Info info = new Info()
+        return new Info()
                 .title("Maverick Platform API")
                 .version("1.0.0")
                 .contact(contact)
@@ -72,8 +98,9 @@ public class SwaggerConfig {
                            """)
                 .termsOfService("http://swagger.io/terms/")
                 .license(license);
+    }
 
-        // Configurazione sicurezza JWT
+    private Components buildComponents() {
         SecurityScheme jwtSecurityScheme = new SecurityScheme()
                 .type(SecurityScheme.Type.HTTP)
                 .scheme("bearer")
@@ -81,16 +108,11 @@ public class SwaggerConfig {
                 .name(BEARER_AUTH)
                 .description("Inserisci il token JWT ottenuto dal login");
 
-        SecurityRequirement securityRequirement = new SecurityRequirement()
-                .addList(BEARER_AUTH);
-
-        Components components = new Components()
+        return new Components()
                 .addSecuritySchemes(BEARER_AUTH, jwtSecurityScheme);
+    }
 
-        return new OpenAPI()
-                .info(info)
-                .servers(List.of(server))
-                .components(components)
-                .addSecurityItem(securityRequirement);
+    private SecurityRequirement buildSecurityRequirement() {
+        return new SecurityRequirement().addList(BEARER_AUTH);
     }
 }
