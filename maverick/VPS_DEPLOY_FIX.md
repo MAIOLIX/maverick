@@ -10,7 +10,13 @@
 **Problema**: `Property 'spring.profiles.active' imported from location 'application-production.properties' is invalid`
 **Soluzione**: Rimosso `spring.profiles.active` da `application-production.properties`
 
-### 3. ❌ Errore Connessione MinIO (RISOLTO)
+### 4. ❌ Health Check Loop (RISOLTO)
+**Problema**: `/actuator/health sta in loop in avvio` - Endpoint Actuator non disponibile
+**Soluzione**: 
+- Aggiunta dipendenza `spring-boot-starter-actuator` al pom.xml
+- Creato `HealthController` con endpoint semplice `/health`
+- Migliorato Docker HEALTHCHECK con fallback
+- Configurato Actuator per produzione
 **Problema**: `Failed to connect to localhost:32768` - MinIO non raggiungibile
 **Soluzione**: Corrette configurazioni MinIO in `application-production.properties`
 

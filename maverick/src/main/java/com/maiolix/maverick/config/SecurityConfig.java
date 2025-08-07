@@ -43,8 +43,8 @@ public class SecurityConfig {
                 // Debug endpoint (DA RIMUOVERE IN PRODUZIONE)
                 .requestMatchers("/api/debug/**").permitAll()
                 
-                // Endpoint di health e monitoring (opzionali)
-                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // Endpoint di health e monitoring (pubblici per Docker)
+                .requestMatchers("/health/**", "/actuator/health", "/actuator/info").permitAll()
                 
                 // API documentation (Swagger) - solo in sviluppo
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()

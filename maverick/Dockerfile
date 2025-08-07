@@ -51,9 +51,9 @@ EXPOSE 8080
 # Cambio utente
 USER maverick
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
+# Health check con fallback a endpoint semplice
+HEALTHCHECK --interval=45s --timeout=15s --start-period=120s --retries=5 \
+  CMD curl -f -s http://localhost:8080/health || curl -f -s http://localhost:8080/actuator/health || exit 1
 
 # Script di avvio con configurazione JVM dinamica
 ENTRYPOINT ["./docker-entrypoint.sh"]
