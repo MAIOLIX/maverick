@@ -6,14 +6,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 
 @Configuration
 public class SwaggerConfig {
+
+    private static final String BEARER_AUTH = "bearerAuth";
 
     @Value("${server.port:8080}")
     private String serverPort;
@@ -34,29 +39,58 @@ public class SwaggerConfig {
         license.setUrl("https://www.apache.org/licenses/LICENSE-2.0");
 
         Info info = new Info()
-                .title("Maverick ML Model Server API")
+                .title("Maverick Platform API")
                 .version("1.0.0")
                 .contact(contact)
                 .description("""
-                           API per la gestione e predizione di modelli di Machine Learning.
+                           **Maverick Platform** - Sistema completo di gestione modelli ML e amministrazione utenti.
                            
+                           ## 🤖 Gestione Modelli ML
                            Supporta i seguenti formati di modelli:
                            - **MOJO**: Modelli H2O
                            - **ONNX**: Open Neural Network Exchange
                            - **PMML**: Predictive Model Markup Language
                            
+                           ## 👑 Amministrazione
+                           - Gestione utenti e ruoli
+                           - Gestione client API
+                           - Controllo accessi basato su ruoli
+                           
+                           ## 🔐 Autenticazione
+                           L'API utilizza JWT (JSON Web Token) per l'autenticazione:
+                           1. **Login**: POST `/api/auth/login` con username/password
+                           2. **Token**: Usa il token ricevuto nell'header `Authorization: Bearer <token>`
+                           3. **Ruoli**: USER, ADMIN, API_CLIENT con diversi livelli di accesso
+                           
                            ### Funzionalità principali:
-                           - Upload e gestione modelli
+                           - Upload e gestione modelli ML
                            - Predizioni real-time
                            - Schema di input/output
-                           - Informazioni sui modelli
                            - Cache dei modelli in memoria
+                           - Gestione amministrativa completa
+                           - Autenticazione multi-livello
                            """)
                 .termsOfService("http://swagger.io/terms/")
                 .license(license);
 
+        // Configurazione sicurezza JWT
+        SecurityScheme jwtSecurityScheme = new SecurityScheme()
+                .type(SecurityScheme.Type.HTTP)
+                .scheme("bearer")
+                .bearerFormat("JWT")
+                .name(BEARER_AUTH)
+                .description("Inserisci il token JWT ottenuto dal login");
+
+        SecurityRequirement securityRequirement = new SecurityRequirement()
+                .addList(BEARER_AUTH);
+
+        Components components = new Components()
+                .addSecuritySchemes(BEARER_AUTH, jwtSecurityScheme);
+
         return new OpenAPI()
                 .info(info)
-                .servers(List.of(server));
+                .servers(List.of(server))
+                .components(components)
+                .addSecurityItem(securityRequirement);
     }
 }

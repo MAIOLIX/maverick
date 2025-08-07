@@ -73,5 +73,17 @@ mvn test -Dtest=MinioModelRepositoryIntegrationTest
 - ✅ **Test di integrazione completi**
 - ✅ **Gestione errori robusta**
 
-## 📝 **Configurazione**
+## � **Documentazione Completa**
+
+Per la documentazione completa di tutti gli endpoint e funzionalità:
+**📖 [MAVERICK_UNIFIED_ADMIN_GUIDE.md](MAVERICK_UNIFIED_ADMIN_GUIDE.md)**
+
+Include:
+- 🤖 **Maverick Controller** - Gestione modelli ML completa
+- 👑 **Admin Controller** - Gestione utenti e client API
+- 🔐 **Sistema di autenticazione** e sicurezza
+- 🧪 **Test completi** e esempi pratici
+- 🔧 **Troubleshooting** e debug
+
+## �📝 **Configurazione**
 Vedi `application.properties` per configurazione database e MinIO." 

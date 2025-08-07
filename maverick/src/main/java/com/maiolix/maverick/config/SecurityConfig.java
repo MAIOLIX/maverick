@@ -47,7 +47,10 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 
                 // API documentation (Swagger) - solo in sviluppo
-                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
+                
+                // Gestione amministrativa - solo ADMIN
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 
                 // Upload modelli - solo ADMIN
                 .requestMatchers("/api/models/upload/**").hasRole("ADMIN")

@@ -121,12 +121,32 @@ public class UserService {
     }
 
     /**
-     * Crea un nuovo utente
+     * Verifica se esiste già un utente con questo username
      */
-    public UserEntity createUser(String username, String email, String password, UserEntity.Role role) {
+    public boolean existsByUsername(String username) {
+        return userRepository.findByUsernameAndIsActiveTrue(username).isPresent();
+    }
+
+    /**
+     * Verifica se esiste già un client con questo clientId
+     */
+    public boolean existsByClientId(String clientId) {
+        return apiClientRepository.findByClientIdAndIsActiveTrue(clientId).isPresent();
+    }
+
+    /**
+     * Crea un nuovo utente con validazione
+     */
+    public UserEntity createUser(String username, String email, String password, UserEntity.Role role, String firstName, String lastName) {
+        if (existsByUsername(username)) {
+            throw new IllegalArgumentException("Username già esistente: " + username);
+        }
+        
         UserEntity user = UserEntity.builder()
                 .username(username)
                 .email(email)
+                .firstName(firstName)
+                .lastName(lastName)
                 .passwordHash(passwordEncoder.encode(password))
                 .role(role)
                 .isActive(true)
@@ -139,16 +159,25 @@ public class UserService {
     }
 
     /**
-     * Crea un nuovo client API
+     * Crea un nuovo client API con validazione
      */
-    public ApiClientEntity createApiClient(String clientId, String clientSecret, String name, boolean adminAccess) {
+    public ApiClientEntity createApiClient(String clientId, String clientSecret, String name, String description, boolean adminAccess, Integer rateLimitPerMinute) {
+        if (existsByClientId(clientId)) {
+            throw new IllegalArgumentException("Client ID già esistente: " + clientId);
+        }
+        
+        // Calcola rate limit
+        int defaultRateLimit = adminAccess ? 1000 : 100;
+        int finalRateLimit = rateLimitPerMinute != null ? rateLimitPerMinute : defaultRateLimit;
+        
         ApiClientEntity client = ApiClientEntity.builder()
                 .clientId(clientId)
                 .clientSecretHash(passwordEncoder.encode(clientSecret))
                 .name(name)
+                .description(description)
                 .adminAccess(adminAccess)
-                .allowedScopes(adminAccess ? "upload,predict,schema" : "predict,schema")
-                .rateLimitPerMinute(adminAccess ? 1000 : 100)
+                .allowedScopes(adminAccess ? "upload,predict,schema,manage" : "predict,schema")
+                .rateLimitPerMinute(finalRateLimit)
                 .isActive(true)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -156,5 +185,65 @@ public class UserService {
         ApiClientEntity saved = apiClientRepository.save(client);
         log.info("Created new API client '{}' with admin access: {}", clientId, adminAccess);
         return saved;
+    }
+
+    /**
+     * Elimina utente per ID
+     */
+    public boolean deleteUser(Long userId) {
+        Optional<UserEntity> userOpt = userRepository.findById(userId);
+        if (userOpt.isPresent()) {
+            UserEntity user = userOpt.get();
+            userRepository.delete(user);
+            log.info("Deleted user '{}' (ID: {})", user.getUsername(), userId);
+            return true;
+        } else {
+            log.warn("Attempted to delete non-existent user with ID: {}", userId);
+            return false;
+        }
+    }
+
+    /**
+     * Elimina client API per ID
+     */
+    public boolean deleteApiClient(Long clientId) {
+        Optional<ApiClientEntity> clientOpt = apiClientRepository.findById(clientId);
+        if (clientOpt.isPresent()) {
+            ApiClientEntity client = clientOpt.get();
+            apiClientRepository.delete(client);
+            log.info("Deleted API client '{}' (ID: {})", client.getClientId(), clientId);
+            return true;
+        } else {
+            log.warn("Attempted to delete non-existent API client with ID: {}", clientId);
+            return false;
+        }
+    }
+
+    /**
+     * Ottiene tutti gli utenti (per admin)
+     */
+    public java.util.List<UserEntity> getAllUsers() {
+        return userRepository.findAll();
+    }
+
+    /**
+     * Ottiene tutti i client API (per admin)
+     */
+    public java.util.List<ApiClientEntity> getAllApiClients() {
+        return apiClientRepository.findAll();
+    }
+
+    /**
+     * Trova utente per ID
+     */
+    public Optional<UserEntity> findUserById(Long userId) {
+        return userRepository.findById(userId);
+    }
+
+    /**
+     * Trova client API per ID
+     */
+    public Optional<ApiClientEntity> findApiClientById(Long clientId) {
+        return apiClientRepository.findById(clientId);
     }
 }
