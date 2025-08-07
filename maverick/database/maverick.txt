@@ -1,0 +1,757 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 17.5 (Debian 17.5-1.pgdg120+1)
+-- Dumped by pg_dump version 17.5
+
+-- Started on 2025-08-07 09:27:34 UTC
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- TOC entry 7 (class 2615 OID 24580)
+-- Name: maverick; Type: SCHEMA; Schema: -; Owner: maiolix
+--
+
+CREATE SCHEMA maverick;
+
+
+ALTER SCHEMA maverick OWNER TO maiolix;
+
+--
+-- TOC entry 2 (class 3079 OID 26352)
+-- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- TOC entry 3504 (class 0 OID 0)
+-- Dependencies: 2
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
+
+
+--
+-- TOC entry 3 (class 3079 OID 26341)
+-- Name: uuid-ossp; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
+
+
+--
+-- TOC entry 3505 (class 0 OID 0)
+-- Dependencies: 3
+-- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UUIDs)';
+
+
+--
+-- TOC entry 284 (class 1255 OID 26553)
+-- Name: get_model_statistics(); Type: FUNCTION; Schema: public; Owner: maiolix
+--
+
+CREATE FUNCTION public.get_model_statistics() RETURNS TABLE(total_models bigint, total_predictions bigint, avg_file_size numeric, most_used_model character varying)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        COUNT(*)::BIGINT as total_models,
+        SUM(prediction_count)::BIGINT as total_predictions,
+        AVG(file_size)::DECIMAL as avg_file_size,
+        (SELECT model_name FROM models WHERE is_active = true ORDER BY prediction_count DESC LIMIT 1) as most_used_model
+    FROM models 
+    WHERE is_active = true;
+END;
+$$;
+
+
+ALTER FUNCTION public.get_model_statistics() OWNER TO maiolix;
+
+--
+-- TOC entry 286 (class 1255 OID 26555)
+-- Name: get_model_storage_info(character varying, character varying); Type: FUNCTION; Schema: public; Owner: maiolix
+--
+
+CREATE FUNCTION public.get_model_storage_info(p_model_name character varying, p_version character varying) RETURNS TABLE(storage_type character varying, file_path character varying, bucket_name character varying, bucket_region character varying, full_url text)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        m.storage_type,
+        m.file_path,
+        m.bucket_name,
+        m.bucket_region,
+        CASE 
+            WHEN m.storage_type = 'LOCAL' THEN 'file://' || m.file_path
+            WHEN m.storage_type = 'S3' THEN 's3://' || m.bucket_name || '/' || m.file_path
+            WHEN m.storage_type = 'AZURE_BLOB' THEN 'https://' || split_part(m.bucket_name, '/', 1) || '.blob.core.windows.net/' || m.file_path
+            WHEN m.storage_type = 'GCS' THEN 'gs://' || m.bucket_name || '/' || m.file_path
+            WHEN m.storage_type = 'MINIO' THEN 'minio://' || m.bucket_name || '/' || m.file_path
+            ELSE m.file_path
+        END as full_url
+    FROM models m
+    WHERE m.model_name = p_model_name 
+      AND m.version = p_version 
+      AND m.is_active = true;
+END;
+$$;
+
+
+ALTER FUNCTION public.get_model_storage_info(p_model_name character varying, p_version character varying) OWNER TO maiolix;
+
+--
+-- TOC entry 285 (class 1255 OID 26554)
+-- Name: get_storage_statistics(); Type: FUNCTION; Schema: public; Owner: maiolix
+--
+
+CREATE FUNCTION public.get_storage_statistics() RETURNS TABLE(storage_type character varying, model_count bigint, total_size_mb numeric, avg_size_mb numeric)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        m.storage_type,
+        COUNT(*)::BIGINT as model_count,
+        ROUND((SUM(m.file_size)::DECIMAL / 1024 / 1024), 2) as total_size_mb,
+        ROUND((AVG(m.file_size)::DECIMAL / 1024 / 1024), 2) as avg_size_mb
+    FROM models m
+    WHERE m.is_active = true
+    GROUP BY m.storage_type
+    ORDER BY model_count DESC;
+END;
+$$;
+
+
+ALTER FUNCTION public.get_storage_statistics() OWNER TO maiolix;
+
+--
+-- TOC entry 283 (class 1255 OID 26552)
+-- Name: increment_prediction_count(character varying, character varying); Type: FUNCTION; Schema: public; Owner: maiolix
+--
+
+CREATE FUNCTION public.increment_prediction_count(p_model_name character varying, p_version character varying) RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE models 
+    SET prediction_count = prediction_count + 1,
+        last_used_at = CURRENT_TIMESTAMP
+    WHERE model_name = p_model_name 
+      AND version = p_version 
+      AND is_active = true;
+    
+    RETURN FOUND;
+END;
+$$;
+
+
+ALTER FUNCTION public.increment_prediction_count(p_model_name character varying, p_version character varying) OWNER TO maiolix;
+
+--
+-- TOC entry 282 (class 1255 OID 26549)
+-- Name: update_updated_at_column(); Type: FUNCTION; Schema: public; Owner: maiolix
+--
+
+CREATE FUNCTION public.update_updated_at_column() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_updated_at_column() OWNER TO maiolix;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- TOC entry 229 (class 1259 OID 32787)
+-- Name: api_clients; Type: TABLE; Schema: public; Owner: maiolix
+--
+
+CREATE TABLE public.api_clients (
+    id bigint NOT NULL,
+    client_id character varying(100) NOT NULL,
+    client_secret_hash character varying(255) NOT NULL,
+    client_name character varying(255) NOT NULL,
+    admin_access boolean DEFAULT false,
+    is_active boolean DEFAULT true,
+    allowed_scopes character varying(500),
+    rate_limit_per_minute integer DEFAULT 1000,
+    description text,
+    last_used_at timestamp without time zone,
+    usage_count bigint DEFAULT 0,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.api_clients OWNER TO maiolix;
+
+--
+-- TOC entry 228 (class 1259 OID 32786)
+-- Name: api_clients_id_seq; Type: SEQUENCE; Schema: public; Owner: maiolix
+--
+
+CREATE SEQUENCE public.api_clients_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.api_clients_id_seq OWNER TO maiolix;
+
+--
+-- TOC entry 3507 (class 0 OID 0)
+-- Dependencies: 228
+-- Name: api_clients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: maiolix
+--
+
+ALTER SEQUENCE public.api_clients_id_seq OWNED BY public.api_clients.id;
+
+
+--
+-- TOC entry 225 (class 1259 OID 26717)
+-- Name: models; Type: TABLE; Schema: public; Owner: maverick
+--
+
+CREATE TABLE public.models (
+    id bigint NOT NULL,
+    bucket_name character varying(100),
+    bucket_region character varying(50),
+    content_type character varying(100),
+    created_at timestamp(6) without time zone,
+    created_by character varying(100),
+    description text,
+    file_hash character varying(64),
+    file_path character varying(500) NOT NULL,
+    file_size bigint NOT NULL,
+    input_schema text,
+    is_active boolean,
+    last_used_at timestamp(6) without time zone,
+    metadata text,
+    model_name character varying(100) NOT NULL,
+    model_uuid character varying(36),
+    output_schema text,
+    prediction_count bigint,
+    status character varying(20),
+    storage_class character varying(50),
+    storage_type character varying(20) NOT NULL,
+    type character varying(50) NOT NULL,
+    updated_at timestamp(6) without time zone,
+    updated_by character varying(100),
+    version character varying(50) NOT NULL,
+    CONSTRAINT models_status_check CHECK (((status)::text = ANY ((ARRAY['READY'::character varying, 'LOADING'::character varying, 'ERROR'::character varying, 'MAINTENANCE'::character varying])::text[]))),
+    CONSTRAINT models_storage_type_check CHECK (((storage_type)::text = ANY ((ARRAY['LOCAL'::character varying, 'S3'::character varying, 'AZURE_BLOB'::character varying, 'GCS'::character varying, 'MINIO'::character varying])::text[]))),
+    CONSTRAINT models_type_check CHECK (((type)::text = ANY ((ARRAY['ONNX'::character varying, 'PMML'::character varying, 'MOJO'::character varying, 'H2O'::character varying, 'ONNX_EXT'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.models OWNER TO maverick;
+
+--
+-- TOC entry 224 (class 1259 OID 26716)
+-- Name: models_id_seq; Type: SEQUENCE; Schema: public; Owner: maverick
+--
+
+ALTER TABLE public.models ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME public.models_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- TOC entry 221 (class 1259 OID 26585)
+-- Name: prediction_logs; Type: TABLE; Schema: public; Owner: maiolix
+--
+
+CREATE TABLE public.prediction_logs (
+    id bigint NOT NULL,
+    model_id bigint NOT NULL,
+    input_data jsonb,
+    output_data jsonb,
+    confidence_score numeric(5,4),
+    execution_time_ms integer,
+    memory_usage_mb numeric(10,2),
+    client_ip inet,
+    user_agent text,
+    session_id character varying(100),
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_prediction_logs_confidence CHECK (((confidence_score >= (0)::numeric) AND (confidence_score <= (1)::numeric))),
+    CONSTRAINT ck_prediction_logs_execution_time CHECK ((execution_time_ms >= 0))
+);
+
+
+ALTER TABLE public.prediction_logs OWNER TO maiolix;
+
+--
+-- TOC entry 3509 (class 0 OID 0)
+-- Dependencies: 221
+-- Name: TABLE prediction_logs; Type: COMMENT; Schema: public; Owner: maiolix
+--
+
+COMMENT ON TABLE public.prediction_logs IS 'Log delle predizioni per analytics e debugging';
+
+
+--
+-- TOC entry 220 (class 1259 OID 26584)
+-- Name: prediction_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: maiolix
+--
+
+CREATE SEQUENCE public.prediction_logs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.prediction_logs_id_seq OWNER TO maiolix;
+
+--
+-- TOC entry 3510 (class 0 OID 0)
+-- Dependencies: 220
+-- Name: prediction_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: maiolix
+--
+
+ALTER SEQUENCE public.prediction_logs_id_seq OWNED BY public.prediction_logs.id;
+
+
+--
+-- TOC entry 223 (class 1259 OID 26602)
+-- Name: system_config; Type: TABLE; Schema: public; Owner: maiolix
+--
+
+CREATE TABLE public.system_config (
+    id bigint NOT NULL,
+    config_key character varying(100) NOT NULL,
+    config_value text,
+    description text,
+    is_encrypted boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_by character varying(100) DEFAULT 'system'::character varying
+);
+
+
+ALTER TABLE public.system_config OWNER TO maiolix;
+
+--
+-- TOC entry 3511 (class 0 OID 0)
+-- Dependencies: 223
+-- Name: TABLE system_config; Type: COMMENT; Schema: public; Owner: maiolix
+--
+
+COMMENT ON TABLE public.system_config IS 'Configurazioni di sistema';
+
+
+--
+-- TOC entry 222 (class 1259 OID 26601)
+-- Name: system_config_id_seq; Type: SEQUENCE; Schema: public; Owner: maiolix
+--
+
+CREATE SEQUENCE public.system_config_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.system_config_id_seq OWNER TO maiolix;
+
+--
+-- TOC entry 3512 (class 0 OID 0)
+-- Dependencies: 222
+-- Name: system_config_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: maiolix
+--
+
+ALTER SEQUENCE public.system_config_id_seq OWNED BY public.system_config.id;
+
+
+--
+-- TOC entry 227 (class 1259 OID 32770)
+-- Name: users; Type: TABLE; Schema: public; Owner: maiolix
+--
+
+CREATE TABLE public.users (
+    id bigint NOT NULL,
+    username character varying(100) NOT NULL,
+    password_hash character varying(255) NOT NULL,
+    email character varying(255),
+    first_name character varying(100),
+    last_name character varying(100),
+    role character varying(20) NOT NULL,
+    is_active boolean DEFAULT true,
+    user_type character varying(20) DEFAULT 'HUMAN'::character varying,
+    last_login timestamp without time zone,
+    login_count bigint DEFAULT 0,
+    keycloak_subject character varying(255),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['ADMIN'::character varying, 'PREDICTOR'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.users OWNER TO maiolix;
+
+--
+-- TOC entry 226 (class 1259 OID 32769)
+-- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: maiolix
+--
+
+CREATE SEQUENCE public.users_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.users_id_seq OWNER TO maiolix;
+
+--
+-- TOC entry 3514 (class 0 OID 0)
+-- Dependencies: 226
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: maiolix
+--
+
+ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- TOC entry 3308 (class 2604 OID 32790)
+-- Name: api_clients id; Type: DEFAULT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.api_clients ALTER COLUMN id SET DEFAULT nextval('public.api_clients_id_seq'::regclass);
+
+
+--
+-- TOC entry 3295 (class 2604 OID 26588)
+-- Name: prediction_logs id; Type: DEFAULT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.prediction_logs ALTER COLUMN id SET DEFAULT nextval('public.prediction_logs_id_seq'::regclass);
+
+
+--
+-- TOC entry 3297 (class 2604 OID 26605)
+-- Name: system_config id; Type: DEFAULT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.system_config ALTER COLUMN id SET DEFAULT nextval('public.system_config_id_seq'::regclass);
+
+
+--
+-- TOC entry 3302 (class 2604 OID 32773)
+-- Name: users id; Type: DEFAULT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- TOC entry 3497 (class 0 OID 32787)
+-- Dependencies: 229
+-- Data for Name: api_clients; Type: TABLE DATA; Schema: public; Owner: maiolix
+--
+
+COPY public.api_clients (id, client_id, client_secret_hash, client_name, admin_access, is_active, allowed_scopes, rate_limit_per_minute, description, last_used_at, usage_count, created_at, updated_at) FROM stdin;
+10	test-admin-client	$2b$10$slYQmyNdGzTn7fLXMBJBXe/QQOyRfQkJGBs1kG3.1XHqXoQXt3j7C	Test Admin Client	t	t	upload,predict,schema,manage	1000	\N	\N	0	2025-08-06 15:02:17.054656	2025-08-06 15:02:17.054656
+11	test-predictor-client	$2b$10$slYQmyNdGzTn7fLXMBJBXe/QQOyRfQkJGBs1kG3.1XHqXoQXt3j7C	Test Predictor Client	f	t	predict,schema	100	\N	\N	0	2025-08-06 15:02:17.054656	2025-08-06 15:02:17.054656
+12	mobile-app-client	$2a$10$erSPAMM565ryZyyTvDwIPuZjWCODQ.WwVT02dtyLNlY2dEq.h0lL.	Mobile Application Client	f	t	predict,schema	100	Client per l'applicazione mobile iOS/Android	\N	0	2025-08-07 10:25:10.657156	\N
+\.
+
+
+--
+-- TOC entry 3493 (class 0 OID 26717)
+-- Dependencies: 225
+-- Data for Name: models; Type: TABLE DATA; Schema: public; Owner: maverick
+--
+
+COPY public.models (id, bucket_name, bucket_region, content_type, created_at, created_by, description, file_hash, file_path, file_size, input_schema, is_active, last_used_at, metadata, model_name, model_uuid, output_schema, prediction_count, status, storage_class, storage_type, type, updated_at, updated_by, version) FROM stdin;
+5	maverick	\N	application/zip	2025-08-05 16:32:26.344354	api-user	Prova con status non attivo	1774896304	iris/1.0/iris-gbm.zip	107804	\N	f	2025-08-06 10:37:22.738135	\N	iris	865e264c-cab9-42b9-92cb-2c84eca239b1	\N	5	READY	\N	MINIO	MOJO	2025-08-06 10:54:29.744815	api-user	1.0
+6	maverick	\N	application/octet-stream	2025-08-06 09:48:08.584989	api-user	Prova con status non attivo	-1196136219	iris/2.0/iris.onnx	698	\N	t	2025-08-07 10:27:53.794707	\N	iris	ac65deb1-8dea-43e6-9d03-7d289b4a06d6	\N	4	READY	\N	MINIO	ONNX	2025-08-06 09:53:19.856948	api-user	2.0
+\.
+
+
+--
+-- TOC entry 3489 (class 0 OID 26585)
+-- Dependencies: 221
+-- Data for Name: prediction_logs; Type: TABLE DATA; Schema: public; Owner: maiolix
+--
+
+COPY public.prediction_logs (id, model_id, input_data, output_data, confidence_score, execution_time_ms, memory_usage_mb, client_ip, user_agent, session_id, created_at) FROM stdin;
+\.
+
+
+--
+-- TOC entry 3491 (class 0 OID 26602)
+-- Dependencies: 223
+-- Data for Name: system_config; Type: TABLE DATA; Schema: public; Owner: maiolix
+--
+
+COPY public.system_config (id, config_key, config_value, description, is_encrypted, created_at, updated_at, updated_by) FROM stdin;
+1	max_model_size_mb	500	Dimensione massima per i file dei modelli in MB	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+2	model_cache_ttl_minutes	60	TTL della cache dei modelli in minuti	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+3	prediction_log_retention_days	90	Giorni di retention per i log delle predizioni	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+4	default_model_timeout_seconds	30	Timeout predefinito per le predizioni in secondi	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+5	s3_default_region	eu-west-1	Regione AWS S3 predefinita	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+6	azure_storage_account	maverickmodels	Nome dell'account Azure Storage	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+7	gcs_project_id	maverick-ml-platform	ID progetto Google Cloud	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+8	minio_endpoint	minio.maverick.local:9000	Endpoint MinIO locale	f	2025-08-05 10:12:34.689276+00	2025-08-05 10:12:34.689276+00	system
+\.
+
+
+--
+-- TOC entry 3495 (class 0 OID 32770)
+-- Dependencies: 227
+-- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: maiolix
+--
+
+COPY public.users (id, username, password_hash, email, first_name, last_name, role, is_active, user_type, last_login, login_count, keycloak_subject, created_at, updated_at) FROM stdin;
+14	test	$2a$10$mP95z22A5vNJuzXe0Vm95OjMYe4kDDRf6T1jG0KDdAB/FC2Fy2pJi	test@maverick.com	Test	User	PREDICTOR	t	HUMAN	2025-08-06 17:17:20.661117	0	\N	2025-08-06 15:02:17.054656	2025-08-06 15:02:17.054656
+13	admin	$2a$10$9Bk9euBOAco55NzZbdEmrueDQa8JcEpLcD85FKs52eWSyGBdIQaXW	admin@maverick.com	Admin	User	ADMIN	t	HUMAN	2025-08-07 10:23:01.970315	0	\N	2025-08-06 15:02:17.054656	2025-08-06 15:02:17.054656
+\.
+
+
+--
+-- TOC entry 3516 (class 0 OID 0)
+-- Dependencies: 228
+-- Name: api_clients_id_seq; Type: SEQUENCE SET; Schema: public; Owner: maiolix
+--
+
+SELECT pg_catalog.setval('public.api_clients_id_seq', 12, true);
+
+
+--
+-- TOC entry 3517 (class 0 OID 0)
+-- Dependencies: 224
+-- Name: models_id_seq; Type: SEQUENCE SET; Schema: public; Owner: maverick
+--
+
+SELECT pg_catalog.setval('public.models_id_seq', 6, true);
+
+
+--
+-- TOC entry 3518 (class 0 OID 0)
+-- Dependencies: 220
+-- Name: prediction_logs_id_seq; Type: SEQUENCE SET; Schema: public; Owner: maiolix
+--
+
+SELECT pg_catalog.setval('public.prediction_logs_id_seq', 1, false);
+
+
+--
+-- TOC entry 3519 (class 0 OID 0)
+-- Dependencies: 222
+-- Name: system_config_id_seq; Type: SEQUENCE SET; Schema: public; Owner: maiolix
+--
+
+SELECT pg_catalog.setval('public.system_config_id_seq', 8, true);
+
+
+--
+-- TOC entry 3520 (class 0 OID 0)
+-- Dependencies: 226
+-- Name: users_id_seq; Type: SEQUENCE SET; Schema: public; Owner: maiolix
+--
+
+SELECT pg_catalog.setval('public.users_id_seq', 15, true);
+
+
+--
+-- TOC entry 3339 (class 2606 OID 32802)
+-- Name: api_clients api_clients_client_id_key; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.api_clients
+    ADD CONSTRAINT api_clients_client_id_key UNIQUE (client_id);
+
+
+--
+-- TOC entry 3341 (class 2606 OID 32800)
+-- Name: api_clients api_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.api_clients
+    ADD CONSTRAINT api_clients_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 3331 (class 2606 OID 26726)
+-- Name: models models_pkey; Type: CONSTRAINT; Schema: public; Owner: maverick
+--
+
+ALTER TABLE ONLY public.models
+    ADD CONSTRAINT models_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 3325 (class 2606 OID 26595)
+-- Name: prediction_logs prediction_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.prediction_logs
+    ADD CONSTRAINT prediction_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 3327 (class 2606 OID 26615)
+-- Name: system_config system_config_config_key_key; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.system_config
+    ADD CONSTRAINT system_config_config_key_key UNIQUE (config_key);
+
+
+--
+-- TOC entry 3329 (class 2606 OID 26613)
+-- Name: system_config system_config_pkey; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.system_config
+    ADD CONSTRAINT system_config_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 3333 (class 2606 OID 26728)
+-- Name: models ukav7y1kntk3p8byusjyx112l7g; Type: CONSTRAINT; Schema: public; Owner: maverick
+--
+
+ALTER TABLE ONLY public.models
+    ADD CONSTRAINT ukav7y1kntk3p8byusjyx112l7g UNIQUE (model_uuid);
+
+
+--
+-- TOC entry 3335 (class 2606 OID 32783)
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 3337 (class 2606 OID 32785)
+-- Name: users users_username_key; Type: CONSTRAINT; Schema: public; Owner: maiolix
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_username_key UNIQUE (username);
+
+
+--
+-- TOC entry 3321 (class 1259 OID 26629)
+-- Name: idx_prediction_logs_created_at; Type: INDEX; Schema: public; Owner: maiolix
+--
+
+CREATE INDEX idx_prediction_logs_created_at ON public.prediction_logs USING btree (created_at);
+
+
+--
+-- TOC entry 3322 (class 1259 OID 26628)
+-- Name: idx_prediction_logs_model_id; Type: INDEX; Schema: public; Owner: maiolix
+--
+
+CREATE INDEX idx_prediction_logs_model_id ON public.prediction_logs USING btree (model_id);
+
+
+--
+-- TOC entry 3323 (class 1259 OID 26630)
+-- Name: idx_prediction_logs_session; Type: INDEX; Schema: public; Owner: maiolix
+--
+
+CREATE INDEX idx_prediction_logs_session ON public.prediction_logs USING btree (session_id);
+
+
+--
+-- TOC entry 3342 (class 2620 OID 26634)
+-- Name: system_config trigger_system_config_updated_at; Type: TRIGGER; Schema: public; Owner: maiolix
+--
+
+CREATE TRIGGER trigger_system_config_updated_at BEFORE UPDATE ON public.system_config FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- TOC entry 3503 (class 0 OID 0)
+-- Dependencies: 8
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
+--
+
+GRANT ALL ON SCHEMA public TO maverick;
+
+
+--
+-- TOC entry 3506 (class 0 OID 0)
+-- Dependencies: 229
+-- Name: TABLE api_clients; Type: ACL; Schema: public; Owner: maiolix
+--
+
+GRANT ALL ON TABLE public.api_clients TO maverick;
+
+
+--
+-- TOC entry 3508 (class 0 OID 0)
+-- Dependencies: 228
+-- Name: SEQUENCE api_clients_id_seq; Type: ACL; Schema: public; Owner: maiolix
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.api_clients_id_seq TO maverick;
+
+
+--
+-- TOC entry 3513 (class 0 OID 0)
+-- Dependencies: 227
+-- Name: TABLE users; Type: ACL; Schema: public; Owner: maiolix
+--
+
+GRANT ALL ON TABLE public.users TO maverick;
+
+
+--
+-- TOC entry 3515 (class 0 OID 0)
+-- Dependencies: 226
+-- Name: SEQUENCE users_id_seq; Type: ACL; Schema: public; Owner: maiolix
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.users_id_seq TO maverick;
+
+
+-- Completed on 2025-08-07 09:27:34 UTC
+
+--
+-- PostgreSQL database dump complete
+--
+
