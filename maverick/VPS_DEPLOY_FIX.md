@@ -1,67 +1,88 @@
-# Deployment VPS - Quick Fix Guide
+# Deployment VPS - Complete Fix Guide
 
-## Problema Risolto
-L'errore `.env: line 68: -XX:HeapDumpPath=/app/logs: No such file or directory` è stato risolto.
+## Problemi Risolti
 
-## Soluzioni Implementate
+### 1. ❌ Errore File .env (RISOLTO)
+**Problema**: `.env: line 68: -XX:HeapDumpPath=/app/logs: No such file or directory`
+**Soluzione**: Rimossi parametri JVM mal formattati, creato script di avvio separato
 
-### 1. File .env Corretto
-Creato file `.env` con configurazioni corrette per VPS che non causano errori di sintassi bash.
+### 2. ❌ Errore Spring Profiles (RISOLTO)
+**Problema**: `Property 'spring.profiles.active' imported from location 'application-production.properties' is invalid`
+**Soluzione**: Rimosso `spring.profiles.active` da `application-production.properties`
 
-### 2. File .env.production
-Creato template pulito per produzione in `.env.production` senza configurazioni JVM problematiche.
+### 3. ❌ Errore Connessione MinIO (RISOLTO)
+**Problema**: `Failed to connect to localhost:32768` - MinIO non raggiungibile
+**Soluzione**: Corrette configurazioni MinIO in `application-production.properties`
 
-### 3. Script Deploy Migliorato
-Aggiornato `deploy-vps.sh` con controllo errori migliorato per il caricamento del file `.env`.
+## Configurazioni Corrette
 
-## Come Procedere
-
-### Per Deploy Immediato
+### File .env per VPS
 ```bash
-# 1. Copia il file di produzione
-cp .env.production .env
-
-# 2. Modifica con i tuoi parametri
-nano .env
-
-# 3. Esegui il deploy
-./deploy-vps.sh deploy
-```
-
-### Configurazioni da Modificare in .env
-```bash
-# Database PostgreSQL
+# Database PostgreSQL esterno
 DATABASE_URL=jdbc:postgresql://YOUR-DB-HOST:5432/maverick
 DATABASE_USER=maverick
 DATABASE_PASSWORD=YOUR-SECURE-PASSWORD
 
-# MinIO Storage
-MINIO_ENDPOINT=http://YOUR-MINIO-HOST:9000
-MINIO_ACCESS_KEY=YOUR-MINIO-ACCESS-KEY
-MINIO_SECRET_KEY=YOUR-MINIO-SECRET-KEY
+# MinIO esterno - IMPORTANTE: usare IP pubblico del VPS
+MINIO_ENDPOINT=http://YOUR-VPS-IP:9000
+MINIO_ACCESS_KEY=your-minio-access-key
+MINIO_SECRET_KEY=your-minio-secret-key
+MINIO_BUCKET=maverick-models
 
 # Security
-JWT_SECRET=YOUR-SUPER-SECURE-JWT-SECRET-KEY
-
-# CORS (per frontend)
-CORS_ORIGINS=https://your-domain.com
+JWT_SECRET=your-super-secure-jwt-secret-key
 ```
 
-### Verifica Deploy
+### Test Senza MinIO
+Per testare l'applicazione senza MinIO esterno:
 ```bash
-# Check status
-./deploy-vps.sh check
-
-# Logs
-./deploy-vps.sh logs
-
-# Health check
-curl http://your-vps-ip:8080/actuator/health
+# Usa profilo test che disabilita MinIO
+SPRING_PROFILES_ACTIVE=test-vps ./deploy-vps.sh deploy
 ```
 
-## Risoluzione del Problema JVM
-- Rimossi parametri JVM mal formattati
-- Semplificata configurazione per VPS
-- Aggiunto controllo errori nel caricamento .env
+## Deployment Steps
 
-Il deploy ora dovrebbe funzionare senza errori di sintassi bash.
+### Opzione 1: Deployment Completo (con MinIO)
+```bash
+# 1. Copia template produzione
+cp .env.production .env
+
+# 2. Modifica .env con i tuoi parametri reali
+nano .env
+
+# 3. Assicurati che MinIO sia raggiungibile
+telnet YOUR-VPS-IP 9000
+
+# 4. Deploy
+./deploy-vps.sh deploy
+```
+
+### Opzione 2: Test Deployment (senza MinIO)
+```bash
+# 1. Test build
+docker build -t maverick:test .
+
+# 2. Test run con profilo test
+docker run -d --name maverick-test \
+  -p 8080:8080 \
+  -e SPRING_PROFILES_ACTIVE=test-vps \
+  maverick:test
+
+# 3. Verifica logs
+docker logs maverick-test
+```
+
+## Troubleshooting
+
+### MinIO Connection Issues
+- Verificare che MinIO sia in esecuzione sull'host esterno
+- Controllare firewall e porte aperte (9000, 9001)
+- Usare IP pubblico del VPS, non localhost
+- Testare connessione: `telnet YOUR-VPS-IP 9000`
+
+### Database Connection Issues  
+- Verificare PostgreSQL esterno raggiungibile
+- Controllare credenziali DATABASE_URL
+- Testare connessione: `telnet YOUR-DB-HOST 5432`
+
+Il deployment ora dovrebbe funzionare correttamente con tutte le correzioni applicate!
