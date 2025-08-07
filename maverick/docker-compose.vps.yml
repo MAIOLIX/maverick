@@ -44,6 +44,11 @@ services:
       PORT: 8080
       CONTEXT_PATH: "${CONTEXT_PATH:-/}"
       
+      # Swagger Configuration
+      SWAGGER_EXTERNAL_URL: "${SWAGGER_EXTERNAL_URL:-}"
+      SWAGGER_SERVER_URL: "${SWAGGER_SERVER_URL:-}"
+      SWAGGER_SERVER_DESCRIPTION: "${SWAGGER_SERVER_DESCRIPTION:-Production Server}"
+      
       # Upload Configuration
       MAX_FILE_SIZE: "${MAX_FILE_SIZE:-100MB}"
       MAX_REQUEST_SIZE: "${MAX_REQUEST_SIZE:-100MB}"

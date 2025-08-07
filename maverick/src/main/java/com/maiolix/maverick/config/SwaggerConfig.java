@@ -1,5 +1,6 @@
 package com.maiolix.maverick.config;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -22,12 +23,18 @@ public class SwaggerConfig {
 
     @Value("${server.port:8080}")
     private String serverPort;
+    
+    @Value("${server.servlet.context-path:}")
+    private String contextPath;
 
     @Value("${swagger.server.url:}")
     private String swaggerServerUrl;
 
-    @Value("${swagger.server.description:Development Server}")
+    @Value("${swagger.server.description:Auto-detected Server}")
     private String swaggerServerDescription;
+    
+    @Value("${swagger.external.url:}")
+    private String externalUrl;
 
     @Bean
     public OpenAPI customOpenAPI() {
@@ -36,22 +43,38 @@ public class SwaggerConfig {
                 .components(buildComponents())
                 .addSecurityItem(buildSecurityRequirement());
 
-        // Configurazione server dinamica per Docker
-        if (!swaggerServerUrl.isEmpty()) {
-            // URL specifico configurato (produzione/Docker)
-            Server server = new Server();
-            server.setUrl(swaggerServerUrl);
-            server.setDescription(swaggerServerDescription);
-            openAPI.servers(List.of(server));
-        } else {
-            // Auto-detect per sviluppo locale
-            Server localServer = new Server();
-            localServer.setUrl("http://localhost:" + serverPort);
-            localServer.setDescription("Development Server");
-            openAPI.servers(List.of(localServer));
-        }
-
+        // Configurazione server dinamica
+        openAPI.servers(buildServerList());
+        
         return openAPI;
+    }
+
+    private List<Server> buildServerList() {
+        List<Server> servers = new ArrayList<>();
+        
+        // URL esterno configurato (per VPS/produzione)
+        if (!externalUrl.isEmpty()) {
+            Server externalServer = new Server();
+            externalServer.setUrl(externalUrl + (contextPath.isEmpty() ? "" : contextPath));
+            externalServer.setDescription("Production Server (VPS)");
+            servers.add(externalServer);
+        }
+        
+        // URL specifico configurato
+        if (!swaggerServerUrl.isEmpty()) {
+            Server configuredServer = new Server();
+            configuredServer.setUrl(swaggerServerUrl);
+            configuredServer.setDescription(swaggerServerDescription);
+            servers.add(configuredServer);
+        }
+        
+        // Auto-detect per sviluppo locale (sempre presente come fallback)
+        Server localServer = new Server();
+        localServer.setUrl("http://localhost:" + serverPort + (contextPath.isEmpty() ? "" : contextPath));
+        localServer.setDescription("Development Server (localhost)");
+        servers.add(localServer);
+        
+        return servers;
     }
 
     private Info buildInfo() {
