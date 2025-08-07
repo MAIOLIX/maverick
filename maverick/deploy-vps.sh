@@ -78,8 +78,20 @@ check_prerequisites() {
 test_external_services() {
     log_info "Test connessioni servizi esterni..."
     
-    # Carica variabili environment
-    source .env
+    # Verifica che il file .env esista e non contenga errori
+    if [ ! -f ".env" ]; then
+        log_error "File .env non trovato!"
+        exit 1
+    fi
+    
+    # Carica variabili environment in modo sicuro
+    set -a  # automatically export all variables
+    if ! source .env 2>/dev/null; then
+        log_error "Errore nel caricamento del file .env. Verificare la sintassi."
+        log_info "Suggerimento: usa .env.production come template"
+        exit 1
+    fi
+    set +a  # stop automatically exporting
     
     # Test PostgreSQL
     if [ -n "$DATABASE_URL" ]; then
