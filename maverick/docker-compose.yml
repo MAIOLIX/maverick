@@ -1,129 +1,97 @@
-# Docker Compose per Maverick Platform
-# Include PostgreSQL, MinIO e l'applicazione
-
 version: '3.8'
 
+# Docker Compose per deployment VPS
+# Solo container Maverick con configurazione esterna per PostgreSQL e MinIO
+
 services:
-  # Database PostgreSQL
-  postgres:
-    image: postgres:15-alpine
-    container_name: maverick-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: maverickDB
-      POSTGRES_USER: maverick
-      POSTGRES_PASSWORD: Alessandro12
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./database:/docker-entrypoint-initdb.d
-    networks:
-      - maverick-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U maverick -d maverickDB"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # MinIO Object Storage
-  minio:
-    image: minio/minio:latest
-    container_name: maverick-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - maverick-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # Maverick Application
-  maverick-app:
-    build:
+  maverick:
+    build: 
       context: .
       dockerfile: Dockerfile
     container_name: maverick-app
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+    
+    # Porta esposta per il proxy manager
     ports:
-      - "8080:8080"
+      - "${MAVERICK_PORT:-8080}:8080"
+    
+    # Configurazione ambiente
     environment:
-      # Database Configuration
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/maverickDB
-      SPRING_DATASOURCE_USERNAME: maverick
-      SPRING_DATASOURCE_PASSWORD: Alessandro12
+      # Profilo Spring Boot
+      SPRING_PROFILES_ACTIVE: production
       
-      # MinIO Configuration
-      MAVERICK_STORAGE_ENDPOINT: http://minio:9000
-      MAVERICK_STORAGE_ACCESS_KEY: minioadmin
-      MAVERICK_STORAGE_SECRET_KEY: minioadmin123
-      MAVERICK_STORAGE_BUCKET_NAME: maverick-models
+      # Database PostgreSQL esterno
+      DATABASE_URL: "${DATABASE_URL}"
+      DATABASE_USER: "${DATABASE_USER}"
+      DATABASE_PASSWORD: "${DATABASE_PASSWORD}"
       
-      # Swagger Configuration (URL dinamico)
-      SWAGGER_SERVER_URL: http://localhost:8080
-      SWAGGER_SERVER_DESCRIPTION: "Docker Development Server"
+      # MinIO esterno
+      MINIO_ENDPOINT: "${MINIO_ENDPOINT}"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-maverick-models}"
+      MINIO_REGION: "${MINIO_REGION:-us-east-1}"
       
-      # JWT Configuration
-      MAVERICK_JWT_SECRET: maverick-docker-secret-key-2024-production-ready
+      # JWT Security
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_EXPIRATION: "${JWT_EXPIRATION:-86400000}"
+      JWT_REFRESH_EXPIRATION: "${JWT_REFRESH_EXPIRATION:-604800000}"
       
-      # Profile attivo
-      SPRING_PROFILES_ACTIVE: docker
+      # CORS Configuration
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
       
-      # JVM Options
-      JAVA_OPTS: -Xmx1g -Xms512m
+      # Server Configuration
+      PORT: 8080
+      CONTEXT_PATH: "${CONTEXT_PATH:-/}"
+      
+      # Upload Configuration
+      MAX_FILE_SIZE: "${MAX_FILE_SIZE:-100MB}"
+      MAX_REQUEST_SIZE: "${MAX_REQUEST_SIZE:-100MB}"
+      UPLOAD_PATH: "/app/uploads"
+      
+      # JVM Options personalizzabili
+      JAVA_OPTS: "${JAVA_OPTS:-}"
+    
+    # Volumi per persistenza dati
     volumes:
-      - app_logs:/app/logs
-      - app_models:/app/models
-    networks:
-      - maverick-network
+      - maverick-uploads:/app/uploads
+      - maverick-logs:/app/logs
+      - maverick-models:/app/models
+    
+    # Limiti risorse
+    deploy:
+      resources:
+        limits:
+          memory: "${MEMORY_LIMIT:-2G}"
+          cpus: "${CPU_LIMIT:-2.0}"
+        reservations:
+          memory: "${MEMORY_RESERVATION:-1G}"
+          cpus: "${CPU_RESERVATION:-1.0}"
+    
+    # Health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 3
+      start_period: 90s
+    
+    # Labels per organizzazione
+    labels:
+      - "com.maverick.component=backend"
+      - "com.maverick.environment=production"
 
-  # Nginx Reverse Proxy (opzionale)
-  nginx:
-    image: nginx:alpine
-    container_name: maverick-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - maverick-app
-    networks:
-      - maverick-network
-
+# Volumi per persistenza dati
 volumes:
-  postgres_data:
+  maverick-uploads:
     driver: local
-  minio_data:
+  maverick-logs:
     driver: local
-  app_logs:
-    driver: local
-  app_models:
+  maverick-models:
     driver: local
 
+# Network (opzionale se serve comunicazione con altri container)
 networks:
-  maverick-network:
+  default:
+    name: maverick-network
     driver: bridge
