@@ -79,7 +79,7 @@ AND object_name LIKE '%_seq';
 
 -- Utente admin (password: admin123)
 -- Hash BCrypt per "admin123" con costo 12
-INSERT INTO users (username, password_hash, email, first_name, last_name, role, is_active) 
+INSERT INTO users (username, password_hash, email, first_name, last_name, role, is_active, user_type, login_count, created_at, updated_at) 
 VALUES (
     'admin', 
     '$2a$12$K8gOBY8BZKZmqkNH8dABN.M1UQGZ0eO6z/cKyLKyHoGqF6I4aXjqG', 
@@ -87,12 +87,16 @@ VALUES (
     'Admin', 
     'User', 
     'ADMIN', 
-    true
+    true,
+    'HUMAN',
+    0,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
 ) ON CONFLICT (username) DO NOTHING;
 
 -- Utente predictor (password: predictor123)
 -- Hash BCrypt per "predictor123" con costo 12
-INSERT INTO users (username, password_hash, email, first_name, last_name, role, is_active) 
+INSERT INTO users (username, password_hash, email, first_name, last_name, role, is_active, user_type, login_count, created_at, updated_at) 
 VALUES (
     'predictor', 
     '$2a$12$H7pS3R2YJJe8W8KXGx4koL7oN1Wb0G4kVmJmVm5YzPj2PO3V5M7aR', 
@@ -100,31 +104,41 @@ VALUES (
     'Predictor', 
     'User', 
     'PREDICTOR', 
-    true
+    true,
+    'HUMAN',
+    0,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
 ) ON CONFLICT (username) DO NOTHING;
 
 -- Client API admin (client_secret: admin-secret-2024)
 -- Hash BCrypt per "admin-secret-2024" con costo 12
-INSERT INTO api_clients (client_id, client_secret_hash, client_name, admin_access, allowed_scopes, rate_limit_per_minute) 
+INSERT INTO api_clients (client_id, client_secret_hash, client_name, admin_access, allowed_scopes, rate_limit_per_minute, usage_count, created_at, updated_at) 
 VALUES (
     'maverick-admin-client', 
     '$2a$12$F5nJ2L1YIIe7W7JXFx3jnN6oM0Vb9F3kUmJmUm4YyOi1PN2U4L6aM', 
     'Maverick Admin Client', 
     true, 
     'upload,predict,schema,manage', 
-    1000
+    1000,
+    0,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
 ) ON CONFLICT (client_id) DO NOTHING;
 
 -- Client API predictor (client_secret: predictor-secret-2024)
 -- Hash BCrypt per "predictor-secret-2024" con costo 12
-INSERT INTO api_clients (client_id, client_secret_hash, client_name, admin_access, allowed_scopes, rate_limit_per_minute) 
+INSERT INTO api_clients (client_id, client_secret_hash, client_name, admin_access, allowed_scopes, rate_limit_per_minute, usage_count, created_at, updated_at) 
 VALUES (
     'maverick-predictor-client', 
     '$2a$12$E4mI1K0YHHe6V6IWEx2imM5nL9Ua8E2jTlImTl3XxNh0OM1T3K5aL', 
     'Maverick Predictor Client', 
     false, 
     'predict,schema', 
-    100
+    100,
+    0,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
 ) ON CONFLICT (client_id) DO NOTHING;
 
 -- =============================================================================
